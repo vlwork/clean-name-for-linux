@@ -1,0 +1,8 @@
+﻿# Normalize text files in the repository
+* text=auto
+
+# PowerShell scripts are primarily edited/run on Windows
+*.ps1 text eol=crlf
+
+# Documentation uses Unix-style line endings
+*.md text eol=lf
