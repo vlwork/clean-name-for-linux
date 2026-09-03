@@ -648,6 +648,20 @@ function Process-Directory {
     $OriginalName = $Directory.Name
     $NewName = Convert-ToSafeName -Name $OriginalName -StrictMode:$Strict
 
+    # ext4 допускает максимум 255 UTF-8 байт на один компонент имени.
+    # Для каталога расширения нет, поэтому ограничиваем очищенное имя
+    # напрямую по границам Unicode text elements до сравнения с исходным.
+    $MaxDirectoryNameUtf8Bytes = 255
+    $NewName = Limit-StringToUtf8ByteCount `
+        -Value $NewName `
+        -MaxUtf8Bytes $MaxDirectoryNameUtf8Bytes
+
+    $NewName = $NewName.TrimEnd([char[]]@('.', ' '))
+
+    if ([string]::IsNullOrWhiteSpace($NewName)) {
+        $NewName = "unnamed"
+    }
+
     # ВАЖНО: используем точное ordinal-сравнение.
     # PowerShell -eq/-ceq может считать канонически эквивалентные
     # Unicode-строки одинаковыми, например:
