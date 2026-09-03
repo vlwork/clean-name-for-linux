@@ -117,27 +117,53 @@ function Convert-ToSafeName {
     # Невидимые / служебные Unicode-символы
     # --------------------------------------------------------
 
-    $NewName = $NewName.Replace(([char]0x200B).ToString(), "") # Zero Width Space
-    $NewName = $NewName.Replace(([char]0x200C).ToString(), "") # Zero Width Non-Joiner
-    $NewName = $NewName.Replace(([char]0x200D).ToString(), "") # Zero Width Joiner
+    if ($StrictMode) {
+        # Не меняем прежнюю политику Strict mode.
+        $NewName = $NewName.Replace(([char]0x200B).ToString(), "") # Zero Width Space
+        $NewName = $NewName.Replace(([char]0x200C).ToString(), "") # Zero Width Non-Joiner
+        $NewName = $NewName.Replace(([char]0x200D).ToString(), "") # Zero Width Joiner
+    }
+    else {
+        # ZWSP separates words, so replace it with a visible space. ZWNJ and ZWJ
+        # are meaningful in natural-language text and emoji sequences; preserve them.
+        $NewName = $NewName.Replace(([char]0x200B).ToString(), " ") # Zero Width Space
+    }
+
     $NewName = $NewName.Replace(([char]0x2060).ToString(), "") # Word Joiner
     $NewName = $NewName.Replace(([char]0xFEFF).ToString(), "") # BOM / ZWNBSP
 
     # Некоторые дополнительные форматирующие символы Unicode
     # (LRM, RLM и directional isolates/embeddings).
+    $BidiControlPattern = '[\u200E\u200F\u202A-\u202E\u2066-\u2069]'
+
+    if (-not $StrictMode) {
+        $BidiControlPattern = '[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]'
+    }
+
+    $NewName = [regex]::Replace($NewName, $BidiControlPattern, '')
+
+    # Неразрывные и другие Unicode-пробелы -> обычный ASCII-пробел.
     $NewName = [regex]::Replace(
         $NewName,
-        '[\u200E\u200F\u202A-\u202E\u2066-\u2069]',
-        ''
+        '[\u00A0\u2000-\u200A\u202F\u205F\u3000]',
+        ' '
     )
 
-    # Неразрывные и похожие пробелы -> обычный пробел
-    $NewName = $NewName.Replace(([char]0x00A0).ToString(), " ")
-    $NewName = $NewName.Replace(([char]0x202F).ToString(), " ")
-    $NewName = $NewName.Replace(([char]0x2007).ToString(), " ")
+    if (-not $StrictMode) {
+        # TAB, CR и LF разделяют текст: сначала заменяем их пробелами, чтобы
+        # удаление остальных ASCII controls не склеивало соседние слова.
+        $NewName = $NewName.Replace(([char]0x0009).ToString(), " ")
+        $NewName = $NewName.Replace(([char]0x000D).ToString(), " ")
+        $NewName = $NewName.Replace(([char]0x000A).ToString(), " ")
+    }
 
     # Управляющие символы ASCII 0-31 и DEL
     $NewName = [regex]::Replace($NewName, '[\x00-\x1F\x7F]', '')
+
+    if (-not $StrictMode) {
+        # SOFT HYPHEN невидим в большинстве интерфейсов: делаем его явным.
+        $NewName = $NewName.Replace(([char]0x00AD).ToString(), "-")
+    }
 
     # --------------------------------------------------------
     # Unicode-аналоги символов, способных создавать проблемы
@@ -164,23 +190,42 @@ function Convert-ToSafeName {
     # Slash-like -> безопасный разделитель
     $NewName = $NewName.Replace(([char]0xFF0F).ToString(), " - ") # ／
     $NewName = $NewName.Replace(([char]0xFF3C).ToString(), " - ") # ＼
-    $NewName = $NewName.Replace(([char]0x2215).ToString(), " - ") # ∕
-    $NewName = $NewName.Replace(([char]0x2044).ToString(), " - ") # ⁄
+
+    if ($StrictMode) {
+        $NewName = $NewName.Replace(([char]0x2215).ToString(), " - ") # ∕
+        $NewName = $NewName.Replace(([char]0x2044).ToString(), " - ") # ⁄
+    }
+    else {
+        $NewName = $NewName.Replace(([char]0xFE68).ToString(), " - ") # ﹨
+    }
 
     # Pipe-like
     $NewName = $NewName.Replace(([char]0xFF5C).ToString(), " - ") # ｜
 
-    # Question-mark variants -> удалить
-    $NewName = $NewName.Replace(([char]0xFF1F).ToString(), "")    # ？ FULLWIDTH QUESTION MARK
-    $NewName = $NewName.Replace(([char]0xFE56).ToString(), "")    # ﹖ SMALL QUESTION MARK
-    $NewName = $NewName.Replace(([char]0x061F).ToString(), "")    # ؟ ARABIC QUESTION MARK
-    $NewName = $NewName.Replace(([char]0x2E2E).ToString(), "")    # ⸮ REVERSED QUESTION MARK
-
-    # Остальные fullwidth-аналоги
-    $NewName = $NewName.Replace(([char]0xFF0A).ToString(), "")    # ＊
-    $NewName = $NewName.Replace(([char]0xFF1C).ToString(), "")    # ＜
-    $NewName = $NewName.Replace(([char]0xFF1E).ToString(), "")    # ＞
-    $NewName = $NewName.Replace(([char]0xFF02).ToString(), "")    # ＂
+    if ($StrictMode) {
+        # Не меняем прежние удаления Strict mode.
+        $NewName = $NewName.Replace(([char]0xFF1F).ToString(), "") # ？
+        $NewName = $NewName.Replace(([char]0xFE56).ToString(), "") # ﹖
+        $NewName = $NewName.Replace(([char]0x061F).ToString(), "") # ؟
+        $NewName = $NewName.Replace(([char]0x2E2E).ToString(), "") # ⸮
+        $NewName = $NewName.Replace(([char]0xFF0A).ToString(), "") # ＊
+        $NewName = $NewName.Replace(([char]0xFF1C).ToString(), "") # ＜
+        $NewName = $NewName.Replace(([char]0xFF1E).ToString(), "") # ＞
+        $NewName = $NewName.Replace(([char]0xFF02).ToString(), "") # ＂
+    }
+    else {
+        # Compatibility-варианты запрещённых question/asterisk/angle/quote
+        # заменяем пробелами. Безопасную языковую пунктуацию сохраняем.
+        $NewName = $NewName.Replace(([char]0xFF1F).ToString(), " ") # ？
+        $NewName = $NewName.Replace(([char]0xFE56).ToString(), " ") # ﹖
+        $NewName = $NewName.Replace(([char]0xFF0A).ToString(), " ") # ＊
+        $NewName = $NewName.Replace(([char]0xFE61).ToString(), " ") # ﹡
+        $NewName = $NewName.Replace(([char]0xFF1C).ToString(), " ") # ＜
+        $NewName = $NewName.Replace(([char]0xFE64).ToString(), " ") # ﹤
+        $NewName = $NewName.Replace(([char]0xFF1E).ToString(), " ") # ＞
+        $NewName = $NewName.Replace(([char]0xFE65).ToString(), " ") # ﹥
+        $NewName = $NewName.Replace(([char]0xFF02).ToString(), " ") # ＂
+    }
 
     # Запятые в обычном режиме НЕ трогаем.
     # Они допустимы в Windows/Linux и полезны для читаемости имён.
@@ -192,17 +237,25 @@ function Convert-ToSafeName {
     # --------------------------------------------------------
 
     $NewName = $NewName -replace ':', ' - '
-    $NewName = $NewName -replace '[<>"]', ''
     $NewName = $NewName -replace '[\\/|]', ' - '
-    # Обычные ASCII-вопросительный знак и звёздочка
-    $NewName = $NewName -replace '[?*]', ''
+
+    if ($StrictMode) {
+        $NewName = $NewName -replace '[<>"]', ''
+        $NewName = $NewName -replace '[?*]', ''
+    }
+    else {
+        # В Normal mode запрещённые ASCII-знаки разделяют соседний текст.
+        $NewName = $NewName -replace '[<>"]', ' '
+        $NewName = $NewName -replace '[?*]', ' '
+    }
 
     # --------------------------------------------------------
-    # Типографские кавычки
+    # Безопасная языковая пунктуация
     # --------------------------------------------------------
 
-    $NewName = $NewName -replace '[“”„«»]', ''
-    $NewName = $NewName -replace '[‘’‚‛]', "'"
+    # В Normal mode сохраняем типографские кавычки, апострофы, primes,
+    # смысловые slash/pipe/colon-символы, variation selectors и combining
+    # marks. NFC уже применён выше; глобальную NFKC не используем.
 
     # --------------------------------------------------------
     # Strict: дополнительно убираем shell-sensitive символы.
@@ -210,6 +263,15 @@ function Convert-ToSafeName {
     # --------------------------------------------------------
 
     if ($StrictMode) {
+        # Сохраняем прежнее фактическое поведение Strict mode, но задаём
+        # smart quotes через однозначные regex Unicode escapes для PS 5.1.
+        $NewName = [regex]::Replace(
+            $NewName,
+            '[\u201C\u201D\u201E\u00AB\u00BB]',
+            ''
+        )
+        $NewName = [regex]::Replace($NewName, '[\u2019\u201B]', "'")
+
         # Апострофы и скобки
         $NewName = $NewName -replace "'", ''
         $NewName = $NewName -replace '[\(\)\[\]\{\}]', ' '
