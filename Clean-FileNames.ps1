@@ -117,30 +117,20 @@ function Convert-ToSafeName {
     # Невидимые / служебные Unicode-символы
     # --------------------------------------------------------
 
-    if ($StrictMode) {
-        # Не меняем прежнюю политику Strict mode.
-        $NewName = $NewName.Replace(([char]0x200B).ToString(), "") # Zero Width Space
-        $NewName = $NewName.Replace(([char]0x200C).ToString(), "") # Zero Width Non-Joiner
-        $NewName = $NewName.Replace(([char]0x200D).ToString(), "") # Zero Width Joiner
-    }
-    else {
-        # ZWSP separates words, so replace it with a visible space. ZWNJ and ZWJ
-        # are meaningful in natural-language text and emoji sequences; preserve them.
-        $NewName = $NewName.Replace(([char]0x200B).ToString(), " ") # Zero Width Space
-    }
+    # ZWSP separates words, so replace it with a visible space. ZWNJ and ZWJ
+    # are meaningful in natural-language text and emoji sequences; preserve them.
+    $NewName = $NewName.Replace(([char]0x200B).ToString(), " ") # Zero Width Space
 
     $NewName = $NewName.Replace(([char]0x2060).ToString(), "") # Word Joiner
     $NewName = $NewName.Replace(([char]0xFEFF).ToString(), "") # BOM / ZWNBSP
 
     # Некоторые дополнительные форматирующие символы Unicode
     # (LRM, RLM и directional isolates/embeddings).
-    $BidiControlPattern = '[\u200E\u200F\u202A-\u202E\u2066-\u2069]'
-
-    if (-not $StrictMode) {
-        $BidiControlPattern = '[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]'
-    }
-
-    $NewName = [regex]::Replace($NewName, $BidiControlPattern, '')
+    $NewName = [regex]::Replace(
+        $NewName,
+        '[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]',
+        ''
+    )
 
     # Неразрывные и другие Unicode-пробелы -> обычный ASCII-пробел.
     $NewName = [regex]::Replace(
@@ -149,21 +139,17 @@ function Convert-ToSafeName {
         ' '
     )
 
-    if (-not $StrictMode) {
-        # TAB, CR и LF разделяют текст: сначала заменяем их пробелами, чтобы
-        # удаление остальных ASCII controls не склеивало соседние слова.
-        $NewName = $NewName.Replace(([char]0x0009).ToString(), " ")
-        $NewName = $NewName.Replace(([char]0x000D).ToString(), " ")
-        $NewName = $NewName.Replace(([char]0x000A).ToString(), " ")
-    }
+    # TAB, CR и LF разделяют текст: сначала заменяем их пробелами, чтобы
+    # удаление остальных ASCII controls не склеивало соседние слова.
+    $NewName = $NewName.Replace(([char]0x0009).ToString(), " ")
+    $NewName = $NewName.Replace(([char]0x000D).ToString(), " ")
+    $NewName = $NewName.Replace(([char]0x000A).ToString(), " ")
 
     # Управляющие символы ASCII 0-31 и DEL
     $NewName = [regex]::Replace($NewName, '[\x00-\x1F\x7F]', '')
 
-    if (-not $StrictMode) {
-        # SOFT HYPHEN невидим в большинстве интерфейсов: делаем его явным.
-        $NewName = $NewName.Replace(([char]0x00AD).ToString(), "-")
-    }
+    # SOFT HYPHEN невидим в большинстве интерфейсов: делаем его явным.
+    $NewName = $NewName.Replace(([char]0x00AD).ToString(), "-")
 
     # --------------------------------------------------------
     # Unicode-аналоги символов, способных создавать проблемы
@@ -190,44 +176,24 @@ function Convert-ToSafeName {
     # Slash-like -> безопасный разделитель
     $NewName = $NewName.Replace(([char]0xFF0F).ToString(), " - ") # ／
     $NewName = $NewName.Replace(([char]0xFF3C).ToString(), " - ") # ＼
-
-    if ($StrictMode) {
-        $NewName = $NewName.Replace(([char]0x2215).ToString(), " - ") # ∕
-        $NewName = $NewName.Replace(([char]0x2044).ToString(), " - ") # ⁄
-    }
-    else {
-        $NewName = $NewName.Replace(([char]0xFE68).ToString(), " - ") # ﹨
-    }
+    $NewName = $NewName.Replace(([char]0xFE68).ToString(), " - ") # ﹨
 
     # Pipe-like
     $NewName = $NewName.Replace(([char]0xFF5C).ToString(), " - ") # ｜
 
-    if ($StrictMode) {
-        # Не меняем прежние удаления Strict mode.
-        $NewName = $NewName.Replace(([char]0xFF1F).ToString(), "") # ？
-        $NewName = $NewName.Replace(([char]0xFE56).ToString(), "") # ﹖
-        $NewName = $NewName.Replace(([char]0x061F).ToString(), "") # ؟
-        $NewName = $NewName.Replace(([char]0x2E2E).ToString(), "") # ⸮
-        $NewName = $NewName.Replace(([char]0xFF0A).ToString(), "") # ＊
-        $NewName = $NewName.Replace(([char]0xFF1C).ToString(), "") # ＜
-        $NewName = $NewName.Replace(([char]0xFF1E).ToString(), "") # ＞
-        $NewName = $NewName.Replace(([char]0xFF02).ToString(), "") # ＂
-    }
-    else {
-        # Compatibility-варианты запрещённых question/asterisk/angle/quote
-        # заменяем пробелами. Безопасную языковую пунктуацию сохраняем.
-        $NewName = $NewName.Replace(([char]0xFF1F).ToString(), " ") # ？
-        $NewName = $NewName.Replace(([char]0xFE56).ToString(), " ") # ﹖
-        $NewName = $NewName.Replace(([char]0xFF0A).ToString(), " ") # ＊
-        $NewName = $NewName.Replace(([char]0xFE61).ToString(), " ") # ﹡
-        $NewName = $NewName.Replace(([char]0xFF1C).ToString(), " ") # ＜
-        $NewName = $NewName.Replace(([char]0xFE64).ToString(), " ") # ﹤
-        $NewName = $NewName.Replace(([char]0xFF1E).ToString(), " ") # ＞
-        $NewName = $NewName.Replace(([char]0xFE65).ToString(), " ") # ﹥
-        $NewName = $NewName.Replace(([char]0xFF02).ToString(), " ") # ＂
-    }
+    # Compatibility-варианты запрещённых question/asterisk/angle/quote
+    # заменяем пробелами. Безопасную языковую пунктуацию сохраняем.
+    $NewName = $NewName.Replace(([char]0xFF1F).ToString(), " ") # ？
+    $NewName = $NewName.Replace(([char]0xFE56).ToString(), " ") # ﹖
+    $NewName = $NewName.Replace(([char]0xFF0A).ToString(), " ") # ＊
+    $NewName = $NewName.Replace(([char]0xFE61).ToString(), " ") # ﹡
+    $NewName = $NewName.Replace(([char]0xFF1C).ToString(), " ") # ＜
+    $NewName = $NewName.Replace(([char]0xFE64).ToString(), " ") # ﹤
+    $NewName = $NewName.Replace(([char]0xFF1E).ToString(), " ") # ＞
+    $NewName = $NewName.Replace(([char]0xFE65).ToString(), " ") # ﹥
+    $NewName = $NewName.Replace(([char]0xFF02).ToString(), " ") # ＂
 
-    # Запятые в обычном режиме НЕ трогаем.
+    # Запятые в Common cleanup и Strict post-pass НЕ трогаем.
     # Они допустимы в Windows/Linux и полезны для читаемости имён.
     # Unicode-варианты запятых также сохраняются.
 
@@ -238,55 +204,52 @@ function Convert-ToSafeName {
 
     $NewName = $NewName -replace ':', ' - '
     $NewName = $NewName -replace '[\\/|]', ' - '
-
-    if ($StrictMode) {
-        $NewName = $NewName -replace '[<>"]', ''
-        $NewName = $NewName -replace '[?*]', ''
-    }
-    else {
-        # В Normal mode запрещённые ASCII-знаки разделяют соседний текст.
-        $NewName = $NewName -replace '[<>"]', ' '
-        $NewName = $NewName -replace '[?*]', ' '
-    }
+    # Запрещённые ASCII-знаки разделяют соседний текст.
+    $NewName = $NewName -replace '[<>"]', ' '
+    $NewName = $NewName -replace '[?*]', ' '
 
     # --------------------------------------------------------
     # Безопасная языковая пунктуация
     # --------------------------------------------------------
 
-    # В Normal mode сохраняем типографские кавычки, апострофы, primes,
+    # Common cleanup сохраняет типографские кавычки, апострофы, primes,
     # смысловые slash/pipe/colon-символы, variation selectors и combining
     # marks. NFC уже применён выше; глобальную NFKC не используем.
 
     # --------------------------------------------------------
-    # Strict: дополнительно убираем shell-sensitive символы.
-    # Обычный режим их НЕ трогает.
+    # Strict post-pass: уменьшение количества shell-sensitive
+    # metacharacters. Это не отменяет обязательное quoting имён файлов.
     # --------------------------------------------------------
 
     if ($StrictMode) {
-        # Сохраняем прежнее фактическое поведение Strict mode, но задаём
-        # smart quotes через однозначные regex Unicode escapes для PS 5.1.
+        # Все распространённые варианты апострофа приводим к U+02BC.
+        # Он сохраняет визуальное разделение и не является ASCII quote.
         $NewName = [regex]::Replace(
             $NewName,
-            '[\u201C\u201D\u201E\u00AB\u00BB]',
-            ''
+            '[\u0027\u2018-\u201B\u02BC\uFF07]',
+            ([char]0x02BC).ToString()
         )
-        $NewName = [regex]::Replace($NewName, '[\u2019\u201B]', "'")
 
-        # Апострофы и скобки
-        $NewName = $NewName -replace "'", ''
+        # Shell grouping, glob и brace characters -> разделитель.
         $NewName = $NewName -replace '[\(\)\[\]\{\}]', ' '
 
-        # Запятые и их распространённые Unicode-варианты
-        $NewName = $NewName.Replace(",", " ")
-        $NewName = $NewName.Replace(([char]0xFF0C).ToString(), " ") # ，
-        $NewName = $NewName.Replace(([char]0xFE50).ToString(), " ") # ﹐
-        $NewName = $NewName.Replace(([char]0x3001).ToString(), " ") # 、
-        $NewName = $NewName.Replace(([char]0x060C).ToString(), " ") # ،
+        # Закрывающая скобка перед сохраняемой запятой не должна оставлять
+        # искусственный пробел: "[Live]," -> "Live,".
+        $NewName = [regex]::Replace(
+            $NewName,
+            '\s+(?=[,\uFF0C\uFE50\u3001\u060C])',
+            ''
+        )
 
-        # Остальные shell-sensitive символы
+        # Видимые метасимволы заменяем, а не удаляем без разделителя.
+        # Плюс служит языково-нейтральной заменой ampersand.
         $NewName = $NewName -replace ';', ' '
-        $NewName = $NewName -replace '&', ' and '
-        $NewName = $NewName -replace '[$!`^~]', ''
+        $NewName = $NewName -replace '&', ' + '
+        $NewName = [regex]::Replace(
+            $NewName,
+            '[\u0024\u0021\u0060\u005E\u007E]',
+            ' '
+        )
     }
 
     # --------------------------------------------------------
@@ -665,6 +628,23 @@ function Process-File {
             '\uFF1E\uFE65\uFF02]',
             ''
         )
+
+        # Strict post-pass для extension body также только уменьшает
+        # количество shell-sensitive metacharacters. Quoting полного имени
+        # по-прежнему обязателен. Пробелы в расширение не добавляем.
+        if ($Strict) {
+            $ExtensionBody = [regex]::Replace(
+                $ExtensionBody,
+                '[\u0027\u2018-\u201B\u02BC\uFF07]',
+                ([char]0x02BC).ToString()
+            )
+            $ExtensionBody = [regex]::Replace(
+                $ExtensionBody,
+                '[\(\)\[\]\{\};\u0024\u0021\u0060\u005E\u007E]+',
+                '-'
+            )
+            $ExtensionBody = $ExtensionBody.Replace("&", "+")
+        }
 
         # Не оставляем одиночную ведущую точку, если body полностью очищен.
         if (-not [string]::IsNullOrEmpty($ExtensionBody)) {
