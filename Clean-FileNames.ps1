@@ -20,7 +20,8 @@ $Utf8EncodingStrict = New-Object System.Text.UTF8Encoding($false, $true)
 #
 # Универсальная проверка и безопасное переименование файлов
 #
-# v6: ограничение длины имени файла учитывает размер в UTF-8 байтах.
+# v6: ограничение длины имени и конфликтные суффиксы учитывают
+#     размер в UTF-8 байтах.
 #
 # v5: исправлено обнаружение Unicode-нормализации.
 #     Например: и + U+0306 -> й (NFC).
@@ -383,6 +384,73 @@ function Limit-FileNameToUtf8ByteCount {
 }
 
 # ------------------------------------------------------------
+# Формирование имени с конфликтным суффиксом
+# ------------------------------------------------------------
+
+function New-ConflictCandidateName {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string]$BaseName,
+
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string]$Extension,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateRange(1, 9223372036854775807)]
+        [long]$Counter,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateRange(1, 2147483647)]
+        [int]$MaxUtf8Bytes
+    )
+
+    # Суффикс строится заново для каждого значения счётчика. Поэтому
+    # переходы (9) -> (10) и (99) -> (100) автоматически уменьшают
+    # доступный базовой части byte budget на фактическую разницу.
+    $ConflictSuffix = " ($Counter)"
+    $SuffixBytes = Get-Utf8ByteCount -Value $ConflictSuffix
+    $AvailableNameBytes = $MaxUtf8Bytes - $SuffixBytes
+
+    if ($AvailableNameBytes -lt 1) {
+        throw "Конфликтный суффикс не помещается в лимит имени."
+    }
+
+    # Расширение сохраняем полностью, когда вместе с суффиксом оно
+    # оставляет место хотя бы для одного пригодного text element базы.
+    $ExtensionBytes = Get-Utf8ByteCount -Value $Extension
+    $AvailableBaseBytes = $AvailableNameBytes - $ExtensionBytes
+    $LimitedBaseName = ""
+
+    if ($AvailableBaseBytes -gt 0) {
+        $LimitedBaseName = Limit-StringToUtf8ByteCount `
+            -Value $BaseName `
+            -MaxUtf8Bytes $AvailableBaseBytes
+
+        $LimitedBaseName = $LimitedBaseName.TrimEnd(
+            [char[]]@('.', ' ')
+        )
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($LimitedBaseName)) {
+        return "$LimitedBaseName$ConflictSuffix$Extension"
+    }
+
+    # Если полное расширение не оставляет места для базы, используем
+    # минимальную безопасную однобайтовую базу. Остаток отдаём расширению:
+    # его префикс усекается только по границам Unicode text elements.
+    $FallbackBaseName = "_"
+    $FallbackBytes = Get-Utf8ByteCount -Value $FallbackBaseName
+    $AvailableExtensionBytes = $AvailableNameBytes - $FallbackBytes
+    $LimitedExtension = Limit-StringToUtf8ByteCount `
+        -Value $Extension `
+        -MaxUtf8Bytes $AvailableExtensionBytes
+
+    return "$FallbackBaseName$ConflictSuffix$LimitedExtension"
+}
+
+# ------------------------------------------------------------
 # Получение уникального имени при совпадениях
 # ------------------------------------------------------------
 
@@ -400,31 +468,25 @@ function Get-UniqueName {
         [switch]$IsDirectory
     )
 
-    $Candidate = $NewName
-    $Counter = 1
+    $MaxNameUtf8Bytes = 255
+    $Extension = ""
+    $BaseName = $NewName
 
-    if ($IsDirectory) {
-        while ($true) {
-            $CandidatePath = Join-Path -Path $Directory -ChildPath $Candidate
-
-            if (
-                -not (Test-Path -LiteralPath $CandidatePath) -or
-                ([string]::Equals(
-                    $CandidatePath,
-                    $OriginalFullName,
-                    [System.StringComparison]::OrdinalIgnoreCase
-                ))
-            ) {
-                return $Candidate
-            }
-
-            $Candidate = "$NewName ($Counter)"
-            $Counter++
-        }
+    if (-not $IsDirectory) {
+        $Extension = [System.IO.Path]::GetExtension($NewName)
+        $BaseName = [System.IO.Path]::GetFileNameWithoutExtension($NewName)
     }
 
-    $Extension = [System.IO.Path]::GetExtension($NewName)
-    $BaseName = [System.IO.Path]::GetFileNameWithoutExtension($NewName)
+    # Для файлов входное имя уже ограничено в Process-File. Повторное
+    # ограничение здесь также гарантирует лимит при прямом вызове функции.
+    # Для каталогов эта проверка не позволяет вернуть длинный кандидат
+    # ещё до появления первого конфликтного суффикса.
+    $Candidate = Limit-FileNameToUtf8ByteCount `
+        -BaseName $BaseName `
+        -Extension $Extension `
+        -MaxUtf8Bytes $MaxNameUtf8Bytes
+
+    $Counter = 1
 
     while ($true) {
         $CandidatePath = Join-Path -Path $Directory -ChildPath $Candidate
@@ -440,7 +502,12 @@ function Get-UniqueName {
             return $Candidate
         }
 
-        $Candidate = "$BaseName ($Counter)$Extension"
+        $Candidate = New-ConflictCandidateName `
+            -BaseName $BaseName `
+            -Extension $Extension `
+            -Counter $Counter `
+            -MaxUtf8Bytes $MaxNameUtf8Bytes
+
         $Counter++
     }
 }
@@ -484,10 +551,9 @@ function Process-File {
         )
     }
 
-    # ext4 допускает до 255 байт на один компонент имени. Фиксированный
-    # резерв под конфликтный суффикс здесь не используем: счётчик в
-    # Get-UniqueName не ограничен, поэтому произвольный резерв всё равно
-    # не даст строгой гарантии. Учёт суффикса будет отдельным изменением.
+    # ext4 допускает до 255 байт на один компонент имени. Здесь ограничиваем
+    # исходный кандидат; Get-UniqueName отдельно пересчитает точный бюджет,
+    # если к имени потребуется добавить конфликтный суффикс.
     $MaxFileNameUtf8Bytes = 255
 
     $NewName = Limit-FileNameToUtf8ByteCount `
