@@ -11,10 +11,16 @@
 
 $ErrorActionPreference = "Stop"
 
+# UTF-8 encoder with strict validation. Invalid UTF-16 input (for example,
+# an unpaired surrogate) raises an error instead of being silently replaced.
+$Utf8EncodingStrict = New-Object System.Text.UTF8Encoding($false, $true)
+
 # ============================================================
-# Clean-FileNames-v5.ps1
+# Clean-FileNames.ps1 (v6 development)
 #
 # Универсальная проверка и безопасное переименование файлов
+#
+# v6: ограничение длины имени файла учитывает размер в UTF-8 байтах.
 #
 # v5: исправлено обнаружение Unicode-нормализации.
 #     Например: и + U+0306 -> й (NFC).
@@ -253,6 +259,130 @@ function Convert-ToSafeName {
 }
 
 # ------------------------------------------------------------
+# Размер строки в UTF-8 байтах
+# ------------------------------------------------------------
+
+function Get-Utf8ByteCount {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string]$Value
+    )
+
+    # Строгий encoder также проверяет корректность UTF-16: одиночные
+    # surrogate code units не заменяются символом U+FFFD незаметно.
+    return $Utf8EncodingStrict.GetByteCount($Value)
+}
+
+# ------------------------------------------------------------
+# Безопасное усечение строки по размеру в UTF-8
+# ------------------------------------------------------------
+
+function Limit-StringToUtf8ByteCount {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string]$Value,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateRange(0, 2147483647)]
+        [int]$MaxUtf8Bytes
+    )
+
+    $ValueBytes = Get-Utf8ByteCount -Value $Value
+
+    if ($ValueBytes -le $MaxUtf8Bytes) {
+        return $Value
+    }
+
+    $Builder = New-Object System.Text.StringBuilder
+    $UsedBytes = 0
+
+    # Перебираем Unicode text elements, а не UTF-16 code units.
+    # Поэтому усечение не разрезает surrogate pair и по возможности
+    # сохраняет базовый символ вместе с его combining marks.
+    $Enumerator = [System.Globalization.StringInfo]::GetTextElementEnumerator(
+        $Value
+    )
+
+    while ($Enumerator.MoveNext()) {
+        $TextElement = $Enumerator.GetTextElement()
+        $TextElementBytes = Get-Utf8ByteCount -Value $TextElement
+
+        if (($UsedBytes + $TextElementBytes) -gt $MaxUtf8Bytes) {
+            break
+        }
+
+        [void]$Builder.Append($TextElement)
+        $UsedBytes += $TextElementBytes
+    }
+
+    return $Builder.ToString()
+}
+
+# ------------------------------------------------------------
+# Ограничение полного имени файла с сохранением расширения
+# ------------------------------------------------------------
+
+function Limit-FileNameToUtf8ByteCount {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string]$BaseName,
+
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string]$Extension,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateRange(1, 2147483647)]
+        [int]$MaxUtf8Bytes
+    )
+
+    $FullName = "$BaseName$Extension"
+
+    if ((Get-Utf8ByteCount -Value $FullName) -le $MaxUtf8Bytes) {
+        return $FullName
+    }
+
+    # Сначала сохраняем расширение целиком и отдаём оставшийся byte budget
+    # базовой части имени.
+    $ExtensionBytes = Get-Utf8ByteCount -Value $Extension
+    $AvailableBaseBytes = $MaxUtf8Bytes - $ExtensionBytes
+    $LimitedBaseName = ""
+
+    if ($AvailableBaseBytes -gt 0) {
+        $LimitedBaseName = Limit-StringToUtf8ByteCount `
+            -Value $BaseName `
+            -MaxUtf8Bytes $AvailableBaseBytes
+
+        $LimitedBaseName = $LimitedBaseName.TrimEnd(
+            [char[]]@('.', ' ')
+        )
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($LimitedBaseName)) {
+        return "$LimitedBaseName$Extension"
+    }
+
+    # Полное расширение иногда не оставляет места даже для одного
+    # пригодного text element базового имени. В этом редком случае
+    # сохраняем безопасную базовую часть и максимально возможный префикс
+    # расширения. Это гарантирует соблюдение лимита и непустое имя.
+    $FallbackBaseName = Limit-StringToUtf8ByteCount `
+        -Value "unnamed" `
+        -MaxUtf8Bytes $MaxUtf8Bytes
+
+    $FallbackBytes = Get-Utf8ByteCount -Value $FallbackBaseName
+    $AvailableExtensionBytes = $MaxUtf8Bytes - $FallbackBytes
+    $LimitedExtension = Limit-StringToUtf8ByteCount `
+        -Value $Extension `
+        -MaxUtf8Bytes $AvailableExtensionBytes
+
+    return "$FallbackBaseName$LimitedExtension"
+}
+
+# ------------------------------------------------------------
 # Получение уникального имени при совпадениях
 # ------------------------------------------------------------
 
@@ -354,26 +484,16 @@ function Process-File {
         )
     }
 
-    $NewName = "$SafeBaseName$SafeExtension"
+    # ext4 допускает до 255 байт на один компонент имени. Фиксированный
+    # резерв под конфликтный суффикс здесь не используем: счётчик в
+    # Get-UniqueName не ограничен, поэтому произвольный резерв всё равно
+    # не даст строгой гарантии. Учёт суффикса будет отдельным изменением.
+    $MaxFileNameUtf8Bytes = 255
 
-    # Ограничиваем имя файла 200 символами, чтобы оставить
-    # запас для полного пути и совместимости с различными клиентами.
-    $MaxFileNameLength = 200
-
-    if ($NewName.Length -gt $MaxFileNameLength) {
-        $AvailableLength = $MaxFileNameLength - $SafeExtension.Length
-
-        if ($AvailableLength -lt 1) {
-            $AvailableLength = 1
-        }
-
-        $SafeBaseName = $SafeBaseName.Substring(
-            0,
-            [Math]::Min($SafeBaseName.Length, $AvailableLength)
-        ).TrimEnd([char[]]@('.', ' '))
-
-        $NewName = "$SafeBaseName$SafeExtension"
-    }
+    $NewName = Limit-FileNameToUtf8ByteCount `
+        -BaseName $SafeBaseName `
+        -Extension $SafeExtension `
+        -MaxUtf8Bytes $MaxFileNameUtf8Bytes
 
     # ВАЖНО: используем точное ordinal-сравнение.
     # PowerShell -eq/-ceq может считать канонически эквивалентные
