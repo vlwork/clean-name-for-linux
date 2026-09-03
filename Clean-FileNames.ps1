@@ -587,30 +587,89 @@ function Process-File {
     $Stats.Checked++
 
     $OriginalName = $File.Name
-    $Extension = $File.Extension
 
-    if ([string]::IsNullOrEmpty($Extension)) {
+    # Одиночная ведущая точка обозначает dotfile, а не расширение.
+    # Для остальных имён сохраняем прежнюю семантику последней точки:
+    # .config.json -> .config + .json, archive.tar.gz -> archive.tar + .gz.
+    $IsSimpleDotfile = (
+        $OriginalName.Length -gt 1 -and
+        $OriginalName[0] -eq [char]0x002E -and
+        -not $OriginalName.Substring(1).Contains(".")
+    )
+
+    $LastDotIndex = $OriginalName.LastIndexOf([char]0x002E)
+
+    if (
+        $IsSimpleDotfile -or
+        $LastDotIndex -lt 0 -or
+        $LastDotIndex -eq ($OriginalName.Length - 1)
+    ) {
         $BaseName = $OriginalName
+        $Extension = ""
     }
     else {
-        $BaseName = $OriginalName.Substring(
-            0,
-            $OriginalName.Length - $Extension.Length
-        )
+        $BaseName = $OriginalName.Substring(0, $LastDotIndex)
+        $Extension = $OriginalName.Substring($LastDotIndex)
     }
 
     $SafeBaseName = Convert-ToSafeName -Name $BaseName -StrictMode:$Strict
 
-    # Расширение стараемся сохранить как есть,
-    # удаляя только явно посторонние символы.
-    $SafeExtension = $Extension
+    # Ведущую точку не пропускаем через очистку: нормализуем только body.
+    # В отличие от старого category allowlist, эта политика сохраняет
+    # национальные буквы, combining marks, emoji и безопасные символы Unicode.
+    $SafeExtension = ""
 
-    if (-not [string]::IsNullOrEmpty($SafeExtension)) {
-        $SafeExtension = [regex]::Replace(
-            $SafeExtension,
-            '[^.\p{L}\p{Nd}_-]',
+    if (-not [string]::IsNullOrEmpty($Extension)) {
+        $ExtensionBody = $Extension.Substring(1)
+
+        # NFC применяется только к extension body. Глобальную NFKC
+        # не используем, чтобы не менять совместимые Unicode-символы.
+        try {
+            $ExtensionBody = $ExtensionBody.Normalize(
+                [System.Text.NormalizationForm]::FormC
+            )
+        }
+        catch {
+            # Если конкретная строка не нормализуется, продолжаем очистку.
+        }
+
+        # Controls, bidi formatting, WORD JOINER, BOM и ZWSP не несут
+        # полезной информации для расширения. ZWNJ, ZWJ, variation selectors
+        # и combining marks намеренно не входят в удаляемые наборы.
+        $ExtensionBody = [regex]::Replace(
+            $ExtensionBody,
+            '[\x00-\x1F\x7F]',
             ''
         )
+        $ExtensionBody = [regex]::Replace(
+            $ExtensionBody,
+            '[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]',
+            ''
+        )
+        $ExtensionBody = $ExtensionBody.Replace(([char]0x200B).ToString(), "")
+        $ExtensionBody = $ExtensionBody.Replace(([char]0x2060).ToString(), "")
+        $ExtensionBody = $ExtensionBody.Replace(([char]0xFEFF).ToString(), "")
+
+        # Пробелы и запрещённые Windows символы в extension body удаляем,
+        # не превращая короткое расширение в отдельную фразу с разделителями.
+        $ExtensionBody = [regex]::Replace($ExtensionBody, '\s+', '')
+        $ExtensionBody = [regex]::Replace(
+            $ExtensionBody,
+            '[<>:"/\\|?*]',
+            ''
+        )
+        $ExtensionBody = [regex]::Replace(
+            $ExtensionBody,
+            '[\uFF1A\uFE55\uFF0F\uFF3C\uFE68\uFF5C' +
+            '\uFF1F\uFE56\uFF0A\uFE61\uFF1C\uFE64' +
+            '\uFF1E\uFE65\uFF02]',
+            ''
+        )
+
+        # Не оставляем одиночную ведущую точку, если body полностью очищен.
+        if (-not [string]::IsNullOrEmpty($ExtensionBody)) {
+            $SafeExtension = ".$ExtensionBody"
+        }
     }
 
     # ext4 допускает до 255 байт на один компонент имени. Здесь ограничиваем
