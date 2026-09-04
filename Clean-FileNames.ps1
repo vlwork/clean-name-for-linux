@@ -482,13 +482,13 @@ function New-ConflictCandidateName {
 function Get-UniqueName {
     param(
         [Parameter(Mandatory = $true)]
-        [string]$Directory,
+        [System.Collections.Generic.Dictionary[string,string]]$Namespace,
 
         [Parameter(Mandatory = $true)]
         [string]$NewName,
 
         [Parameter(Mandatory = $true)]
-        [string]$OriginalFullName,
+        [string]$OwnerId,
 
         [switch]$IsDirectory
     )
@@ -514,14 +514,18 @@ function Get-UniqueName {
     $Counter = 1
 
     while ($true) {
-        $CandidatePath = Join-Path -Path $Directory -ChildPath $Candidate
+        $OccupantOwnerId = $null
+        $IsOccupied = $Namespace.TryGetValue(
+            $Candidate,
+            [ref]$OccupantOwnerId
+        )
 
         if (
-            -not (Test-Path -LiteralPath $CandidatePath) -or
+            -not $IsOccupied -or
             ([string]::Equals(
-                $CandidatePath,
-                $OriginalFullName,
-                [System.StringComparison]::OrdinalIgnoreCase
+                $OccupantOwnerId,
+                $OwnerId,
+                [System.StringComparison]::Ordinal
             ))
         ) {
             return $Candidate
@@ -538,15 +542,264 @@ function Get-UniqueName {
 }
 
 # ------------------------------------------------------------
+# Snapshot и виртуальное состояние имён
+# ------------------------------------------------------------
+
+function Get-OriginalRelativePath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FullName
+    )
+
+    $RootPrefix = $RootPath
+    $Separator = [System.IO.Path]::DirectorySeparatorChar.ToString()
+
+    if (-not $RootPrefix.EndsWith($Separator)) {
+        $RootPrefix += $Separator
+    }
+
+    if (-not $FullName.StartsWith(
+        $RootPrefix,
+        [System.StringComparison]::OrdinalIgnoreCase
+    )) {
+        throw "Объект находится вне корневого каталога: $FullName"
+    }
+
+    return $FullName.Substring($RootPrefix.Length)
+}
+
+function New-SnapshotState {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [System.IO.FileInfo[]]$Files,
+
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [System.IO.DirectoryInfo[]]$Directories
+    )
+
+    $RootOwnerId = "ROOT"
+    $DirectoryOwnerByPath = New-Object `
+        'System.Collections.Generic.Dictionary[string,string]' `
+        ([System.StringComparer]::OrdinalIgnoreCase)
+    $RecordsByOwnerId = New-Object `
+        'System.Collections.Generic.Dictionary[string,object]' `
+        ([System.StringComparer]::Ordinal)
+    $Namespaces = New-Object `
+        'System.Collections.Generic.Dictionary[string,object]' `
+        ([System.StringComparer]::Ordinal)
+    $FileRecords = New-Object System.Collections.ArrayList
+    $DirectoryRecords = New-Object System.Collections.ArrayList
+
+    $DirectoryOwnerByPath.Add($RootPath, $RootOwnerId)
+    $NextOwnerNumber = 1
+
+    # Сначала назначаем ID всем каталогам, чтобы ParentOwnerId не зависел
+    # от порядка, в котором Get-ChildItem вернул вложенные каталоги.
+    foreach ($Directory in $Directories) {
+        $OwnerId = "D:$NextOwnerNumber"
+        $NextOwnerNumber++
+        $RelativePath = Get-OriginalRelativePath `
+            -FullName $Directory.FullName
+        $Depth = @($RelativePath -split '[\\/]').Count
+
+        $Record = [pscustomobject]@{
+            OwnerId           = $OwnerId
+            ItemType         = "Directory"
+            OriginalFullName = $Directory.FullName
+            OriginalName     = $Directory.Name
+            ParentFullName   = $Directory.Parent.FullName
+            ParentOwnerId    = $null
+            RelativePath     = $RelativePath
+            Depth            = $Depth
+            InfoObject       = $Directory
+            CurrentVirtualName = $Directory.Name
+        }
+
+        $DirectoryOwnerByPath.Add($Directory.FullName, $OwnerId)
+        $RecordsByOwnerId.Add($OwnerId, $Record)
+        [void]$DirectoryRecords.Add($Record)
+    }
+
+    foreach ($Record in $DirectoryRecords) {
+        $ParentOwnerId = $null
+
+        if (-not $DirectoryOwnerByPath.TryGetValue(
+            $Record.ParentFullName,
+            [ref]$ParentOwnerId
+        )) {
+            throw "Не найден snapshot-владелец родителя: $($Record.ParentFullName)"
+        }
+
+        $Record.ParentOwnerId = $ParentOwnerId
+    }
+
+    foreach ($File in $Files) {
+        $OwnerId = "F:$NextOwnerNumber"
+        $NextOwnerNumber++
+        $ParentOwnerId = $null
+
+        if (-not $DirectoryOwnerByPath.TryGetValue(
+            $File.DirectoryName,
+            [ref]$ParentOwnerId
+        )) {
+            throw "Не найден snapshot-владелец родителя: $($File.DirectoryName)"
+        }
+
+        $RelativePath = Get-OriginalRelativePath -FullName $File.FullName
+        $Record = [pscustomobject]@{
+            OwnerId           = $OwnerId
+            ItemType         = "File"
+            OriginalFullName = $File.FullName
+            OriginalName     = $File.Name
+            ParentFullName   = $File.DirectoryName
+            ParentOwnerId    = $ParentOwnerId
+            RelativePath     = $RelativePath
+            Depth            = @($RelativePath -split '[\\/]').Count
+            InfoObject       = $File
+            CurrentVirtualName = $File.Name
+        }
+
+        $RecordsByOwnerId.Add($OwnerId, $Record)
+        [void]$FileRecords.Add($Record)
+    }
+
+    # Файлы и каталоги одного родителя используют общий namespace.
+    # OrdinalIgnoreCase соответствует текущей Windows-политике имён;
+    # дополнительную Unicode-нормализацию comparer намеренно не делает.
+    foreach ($Record in @($DirectoryRecords) + @($FileRecords)) {
+        if (-not $Namespaces.ContainsKey($Record.ParentOwnerId)) {
+            $Namespace = New-Object `
+                'System.Collections.Generic.Dictionary[string,string]' `
+                ([System.StringComparer]::OrdinalIgnoreCase)
+            $Namespaces.Add($Record.ParentOwnerId, $Namespace)
+        }
+
+        $Namespace = [System.Collections.Generic.Dictionary[string,string]](
+            $Namespaces[$Record.ParentOwnerId]
+        )
+        $Namespace.Add($Record.OriginalName, $Record.OwnerId)
+    }
+
+    return [pscustomobject]@{
+        RootOwnerId     = $RootOwnerId
+        Files           = [object[]]$FileRecords.ToArray()
+        Directories     = [object[]]$DirectoryRecords.ToArray()
+        RecordsByOwnerId = $RecordsByOwnerId
+        Namespaces      = $Namespaces
+    }
+}
+
+function Sort-SnapshotRecords {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [object[]]$Records,
+
+        [switch]$DirectoriesDeepestFirst
+    )
+
+    $SortedRecords = [object[]]@($Records)
+    $Comparer = [System.Collections.Generic.Comparer[object]]::Create(
+        [System.Comparison[object]]{
+            param($Left, $Right)
+
+            if ($DirectoriesDeepestFirst) {
+                $DepthComparison = $Right.Depth.CompareTo($Left.Depth)
+
+                if ($DepthComparison -ne 0) {
+                    return $DepthComparison
+                }
+            }
+
+            $PathComparison = [System.StringComparer]::OrdinalIgnoreCase.Compare(
+                $Left.RelativePath,
+                $Right.RelativePath
+            )
+
+            if ($PathComparison -ne 0) {
+                return $PathComparison
+            }
+
+            return [System.StringComparer]::Ordinal.Compare(
+                $Left.RelativePath,
+                $Right.RelativePath
+            )
+        }
+    )
+
+    [System.Array]::Sort($SortedRecords, $Comparer)
+    return $SortedRecords
+}
+
+function Set-VirtualName {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Record,
+
+        [Parameter(Mandatory = $true)]
+        [string]$NewName
+    )
+
+    if ([string]::Equals(
+        $Record.CurrentVirtualName,
+        $NewName,
+        [System.StringComparison]::Ordinal
+    )) {
+        return
+    }
+
+    $Namespace = [System.Collections.Generic.Dictionary[string,string]](
+        $VirtualNamespaces[$Record.ParentOwnerId]
+    )
+    $CurrentOwnerId = $null
+
+    if (
+        -not $Namespace.TryGetValue(
+            $Record.CurrentVirtualName,
+            [ref]$CurrentOwnerId
+        ) -or
+        -not [string]::Equals(
+            $CurrentOwnerId,
+            $Record.OwnerId,
+            [System.StringComparison]::Ordinal
+        )
+    ) {
+        throw "Нарушено внутреннее состояние владельца имени."
+    }
+
+    $TargetOwnerId = $null
+
+    if (
+        $Namespace.TryGetValue($NewName, [ref]$TargetOwnerId) -and
+        -not [string]::Equals(
+            $TargetOwnerId,
+            $Record.OwnerId,
+            [System.StringComparison]::Ordinal
+        )
+    ) {
+        throw "Целевое имя уже занято другим владельцем."
+    }
+
+    # Remove + Add нужны и для case-only rename: comparer считает старое и
+    # новое написание одним ключом, но state должен хранить выбранный регистр.
+    [void]$Namespace.Remove($Record.CurrentVirtualName)
+    $Namespace.Add($NewName, $Record.OwnerId)
+    $Record.CurrentVirtualName = $NewName
+}
+
+# ------------------------------------------------------------
 # Обработка файла
 # ------------------------------------------------------------
 
 function Process-File {
     param(
         [Parameter(Mandatory = $true)]
-        [System.IO.FileInfo]$File
+        [object]$Record
     )
 
+    $File = [System.IO.FileInfo]$Record.InfoObject
     $Stats.Checked++
 
     $OriginalName = $File.Name
@@ -677,10 +930,13 @@ function Process-File {
 
     $Stats.NeedRename++
 
+    $Namespace = [System.Collections.Generic.Dictionary[string,string]](
+        $VirtualNamespaces[$Record.ParentOwnerId]
+    )
     $NewName = Get-UniqueName `
-        -Directory $File.DirectoryName `
+        -Namespace $Namespace `
         -NewName $NewName `
-        -OriginalFullName $File.FullName
+        -OwnerId $Record.OwnerId
 
     Write-Host ""
     Write-Host "ФАЙЛ:" -ForegroundColor Cyan
@@ -715,6 +971,9 @@ function Process-File {
     }
 
     if (-not $Apply) {
+        # Dry Run моделирует успешный последовательный Apply: старое имя
+        # освобождается и выбранная цель резервируется немедленно.
+        Set-VirtualName -Record $Record -NewName $NewName
         return
     }
 
@@ -724,6 +983,8 @@ function Process-File {
             -NewName $NewName `
             -ErrorAction Stop
 
+        # В Apply state меняется только после успешного Rename-Item.
+        Set-VirtualName -Record $Record -NewName $NewName
         $Stats.Renamed++
     }
     catch {
@@ -741,9 +1002,10 @@ function Process-File {
 function Process-Directory {
     param(
         [Parameter(Mandatory = $true)]
-        [System.IO.DirectoryInfo]$Directory
+        [object]$Record
     )
 
+    $Directory = [System.IO.DirectoryInfo]$Record.InfoObject
     $Stats.Checked++
 
     $OriginalName = $Directory.Name
@@ -778,12 +1040,13 @@ function Process-Directory {
 
     $Stats.NeedRename++
 
-    $ParentDirectory = $Directory.Parent.FullName
-
+    $Namespace = [System.Collections.Generic.Dictionary[string,string]](
+        $VirtualNamespaces[$Record.ParentOwnerId]
+    )
     $NewName = Get-UniqueName `
-        -Directory $ParentDirectory `
+        -Namespace $Namespace `
         -NewName $NewName `
-        -OriginalFullName $Directory.FullName `
+        -OwnerId $Record.OwnerId `
         -IsDirectory
 
     Write-Host ""
@@ -819,6 +1082,7 @@ function Process-Directory {
     }
 
     if (-not $Apply) {
+        Set-VirtualName -Record $Record -NewName $NewName
         return
     }
 
@@ -828,6 +1092,7 @@ function Process-Directory {
             -NewName $NewName `
             -ErrorAction Stop
 
+        Set-VirtualName -Record $Record -NewName $NewName
         $Stats.Renamed++
     }
     catch {
@@ -860,10 +1125,9 @@ else {
 
 Write-Host ""
 
-# ------------------------------------------------------------
-# Файлы
-# ------------------------------------------------------------
-
+# Snapshot файлов и каталогов создаётся до первого Process-File и до любого
+# Rename-Item. Каталоги входят в snapshot даже без -IncludeDirectories,
+# потому что их имена занимают тот же namespace и блокируют цели файлов.
 try {
     $Files = @(
         Get-ChildItem `
@@ -880,52 +1144,79 @@ catch {
     exit 1
 }
 
-foreach ($File in $Files) {
+try {
+    $Directories = @(
+        Get-ChildItem `
+            -LiteralPath $RootPath `
+            -Directory `
+            -Recurse `
+            -Force `
+            -ErrorAction Stop
+    )
+}
+catch {
+    Write-Host "Не удалось получить список каталогов:" -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Red
+    exit 1
+}
+
+try {
+    $SnapshotState = New-SnapshotState `
+        -Files $Files `
+        -Directories $Directories
+    $VirtualNamespaces = $SnapshotState.Namespaces
+    $FileRecords = @(
+        Sort-SnapshotRecords -Records $SnapshotState.Files
+    )
+    $DirectoryRecords = @(
+        Sort-SnapshotRecords `
+            -Records $SnapshotState.Directories `
+            -DirectoriesDeepestFirst
+    )
+}
+catch {
+    Write-Host "Не удалось построить snapshot имён:" -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Red
+    exit 1
+}
+
+# ------------------------------------------------------------
+# Файлы: исходный relative path, OrdinalIgnoreCase + Ordinal tie-breaker
+# ------------------------------------------------------------
+
+foreach ($Record in $FileRecords) {
     try {
-        Process-File -File $File
+        Process-File -Record $Record
     }
     catch {
         $Stats.Errors++
 
         Write-Host ""
         Write-Host "ОШИБКА ОБРАБОТКИ ФАЙЛА:" -ForegroundColor Red
-        Write-Host "  $($File.FullName)" -ForegroundColor Yellow
+        Write-Host "  $($Record.OriginalFullName)" -ForegroundColor Yellow
         Write-Host "  $($_.Exception.Message)" -ForegroundColor Red
     }
 }
 
 # ------------------------------------------------------------
-# Каталоги
+# Каталоги: depth descending, затем те же relative-path comparers
 # ------------------------------------------------------------
 
 if ($IncludeDirectories) {
-    try {
-        $Directories = @(
-            Get-ChildItem `
-                -LiteralPath $RootPath `
-                -Directory `
-                -Recurse `
-                -Force `
-                -ErrorAction Stop |
-            Sort-Object { $_.FullName.Length } -Descending
-        )
-    }
-    catch {
-        Write-Host "Не удалось получить список каталогов:" -ForegroundColor Red
-        Write-Host $_.Exception.Message -ForegroundColor Red
-        exit 1
-    }
+    # При deepest-first все дети обработаны до переименования родителя.
+    # Стабильный ParentOwnerId дополнительно сохраняет namespace независимо
+    # от того, как меняется физический путь каталога.
 
-    foreach ($Directory in $Directories) {
+    foreach ($Record in $DirectoryRecords) {
         try {
-            Process-Directory -Directory $Directory
+            Process-Directory -Record $Record
         }
         catch {
             $Stats.Errors++
 
             Write-Host ""
             Write-Host "ОШИБКА ОБРАБОТКИ ПАПКИ:" -ForegroundColor Red
-            Write-Host "  $($Directory.FullName)" -ForegroundColor Yellow
+            Write-Host "  $($Record.OriginalFullName)" -ForegroundColor Yellow
             Write-Host "  $($_.Exception.Message)" -ForegroundColor Red
         }
     }
