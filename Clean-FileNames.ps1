@@ -13,52 +13,60 @@ $ErrorActionPreference = "Stop"
 
 # UTF-8 encoder with strict validation. Invalid UTF-16 input (for example,
 # an unpaired surrogate) raises an error instead of being silently replaced.
+# (UTF-8 encoder со строгой проверкой. Некорректные входные данные UTF-16,
+# например одиночный surrogate, вызывают ошибку вместо неявной замены.)
 $Utf8EncodingStrict = New-Object System.Text.UTF8Encoding($false, $true)
 
 # ============================================================
-# Clean-FileNames.ps1 (v6 development)
+# Clean File Names — v6 development
+# (Очистка имён файлов — разработка v6)
 #
-# Универсальная проверка и безопасное переименование файлов
+# Checks and safely normalizes file names for transfer between
+# Windows and Linux filesystems. Directories can also be processed.
+# (Проверяет и безопасно нормализует имена файлов для переноса
+# между файловыми системами Windows и Linux. Также может обрабатывать каталоги.)
 #
-# v6: ограничение длины имени и конфликтные суффиксы учитывают
-#     размер в UTF-8 байтах.
+# v6 measures name limits and conflict suffixes in UTF-8 bytes.
+# (В v6 ограничения имён и конфликтные суффиксы учитывают размер в UTF-8 байтах.)
 #
-# v5: исправлено обнаружение Unicode-нормализации.
-#     Например: и + U+0306 -> й (NFC).
-#     Сравнение исходного и нового имени выполняется ordinal,
-#     чтобы такие различия не пропускались.
-#     Обычный режим сохраняет запятые, скобки, апострофы и тире.
-# и, при необходимости, каталогов.
+# v5 added reliable Unicode normalization detection. Example:
+# и + U+0306 -> й (NFC). Original and normalized names are compared
+# using ordinal semantics so these changes are not skipped.
+# (В v5 добавлено надёжное обнаружение Unicode-нормализации. Например:
+# и + U+0306 -> й (NFC). Исходное и нормализованное имена сравниваются
+# с использованием ordinal-семантики, чтобы такие изменения не пропускались.)
 #
-# По умолчанию работает ТОЛЬКО В РЕЖИМЕ ПРОВЕРКИ.
+# By default the script runs in Dry Run mode and does not rename anything.
+# (По умолчанию скрипт работает в режиме Dry Run и ничего не переименовывает.)
 #
-# Примеры:
+# Usage examples (Примеры запуска):
 #
-# Проверить:
+# Check only (Только проверка):
 #   .\Clean-FileNames.ps1 -Path "D:\downloads\Конференции"
 #
-# Применить изменения:
+# Apply changes (Применить изменения):
 #   .\Clean-FileNames.ps1 -Path "D:\downloads\Конференции" -Apply
 #
-# Строгая проверка:
+# Check in Strict mode (Проверить в строгом режиме):
 #   .\Clean-FileNames.ps1 -Path "D:\downloads\Конференции" -Strict
 #
-# Строгий режим + переименование:
+# Apply changes in Strict mode (Применить изменения в строгом режиме):
 #   .\Clean-FileNames.ps1 -Path "D:\downloads\Конференции" -Strict -Apply
 #
-# Также обрабатывать имена папок:
+# Include directory names (Обрабатывать имена каталогов):
 #   .\Clean-FileNames.ps1 -Path "D:\downloads\Конференции" -IncludeDirectories
 #
-# В обычном режиме сохраняются: , ( ) ' — . внутри имени
+# Normal mode preserves , ( ) ' — and internal periods.
+# (Обычный режим сохраняет , ( ) ' — и точки внутри имени.)
 # ============================================================
 
 # ------------------------------------------------------------
-# Проверка исходного пути
+# Source path validation (Проверка исходного пути)
 # ------------------------------------------------------------
 
 if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
     Write-Host ""
-    Write-Host "ОШИБКА: папка не существует:" -ForegroundColor Red
+    Write-Host "ERROR: Folder does not exist (ОШИБКА: папка не существует):" -ForegroundColor Red
     Write-Host $Path -ForegroundColor Yellow
     exit 1
 }
@@ -66,7 +74,7 @@ if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
 $RootPath = (Resolve-Path -LiteralPath $Path).Path
 
 # ------------------------------------------------------------
-# Статистика
+# Statistics (Статистика)
 # ------------------------------------------------------------
 
 $Stats = [ordered]@{
@@ -77,7 +85,7 @@ $Stats = [ordered]@{
 }
 
 # ------------------------------------------------------------
-# Зарезервированные имена Windows
+# Reserved Windows names (Зарезервированные имена Windows)
 # ------------------------------------------------------------
 
 $ReservedNames = @(
@@ -87,7 +95,7 @@ $ReservedNames = @(
 )
 
 # ------------------------------------------------------------
-# Преобразование имени в безопасный вид
+# Safe name conversion (Преобразование имени в безопасный вид)
 # ------------------------------------------------------------
 
 function Convert-ToSafeName {
@@ -102,60 +110,75 @@ function Convert-ToSafeName {
 
     # --------------------------------------------------------
     # Unicode NFC normalization.
-    # Не используем NFKC, чтобы без необходимости не менять
-    # типографику, математические символы, надстрочные знаки и т.п.
+    # Do not use NFKC, which could unnecessarily change typography,
+    # mathematical symbols, superscript characters, and similar text.
+    # (Не используем NFKC, чтобы без необходимости не менять типографику,
+    # математические символы, надстрочные знаки и подобный текст.)
     # --------------------------------------------------------
 
     try {
         $NewName = $NewName.Normalize([System.Text.NormalizationForm]::FormC)
     }
     catch {
-        # Если конкретная строка не нормализуется, продолжаем.
+        # Continue when a particular string cannot be normalized.
+        # (Если конкретная строка не нормализуется, продолжаем.)
     }
 
     # --------------------------------------------------------
-    # Невидимые / служебные Unicode-символы
+    # Invisible and formatting Unicode characters
+    # (Невидимые и служебные Unicode-символы)
     # --------------------------------------------------------
 
     # ZWSP separates words, so replace it with a visible space. ZWNJ and ZWJ
     # are meaningful in natural-language text and emoji sequences; preserve them.
-    $NewName = $NewName.Replace(([char]0x200B).ToString(), " ") # Zero Width Space
+    # (ZWSP разделяет слова, поэтому заменяем его видимым пробелом. ZWNJ и ZWJ
+    # значимы в естественных языках и emoji-последовательностях; сохраняем их.)
+    $NewName = $NewName.Replace(([char]0x200B).ToString(), " ") # Zero Width Space (Пробел нулевой ширины)
 
-    $NewName = $NewName.Replace(([char]0x2060).ToString(), "") # Word Joiner
+    $NewName = $NewName.Replace(([char]0x2060).ToString(), "") # Word Joiner (Соединитель слов)
     $NewName = $NewName.Replace(([char]0xFEFF).ToString(), "") # BOM / ZWNBSP
 
-    # Некоторые дополнительные форматирующие символы Unicode
-    # (LRM, RLM и directional isolates/embeddings).
+    # Remove additional Unicode formatting characters such as LRM, RLM,
+    # directional isolates, and directional embeddings.
+    # (Удаляем дополнительные служебные символы Unicode, включая LRM, RLM,
+    # directional isolates и directional embeddings.)
     $NewName = [regex]::Replace(
         $NewName,
         '[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]',
         ''
     )
 
-    # Неразрывные и другие Unicode-пробелы -> обычный ASCII-пробел.
+    # Replace non-breaking and other Unicode spaces with an ASCII space.
+    # (Заменяем неразрывные и другие Unicode-пробелы обычным ASCII-пробелом.)
     $NewName = [regex]::Replace(
         $NewName,
         '[\u00A0\u2000-\u200A\u202F\u205F\u3000]',
         ' '
     )
 
-    # TAB, CR и LF разделяют текст: сначала заменяем их пробелами, чтобы
-    # удаление остальных ASCII controls не склеивало соседние слова.
+    # TAB, CR, and LF separate text. Replace them with spaces before removing
+    # other ASCII controls so adjacent words are not joined together.
+    # (TAB, CR и LF разделяют текст. Сначала заменяем их пробелами, чтобы
+    # удаление остальных ASCII controls не склеивало соседние слова.)
     $NewName = $NewName.Replace(([char]0x0009).ToString(), " ")
     $NewName = $NewName.Replace(([char]0x000D).ToString(), " ")
     $NewName = $NewName.Replace(([char]0x000A).ToString(), " ")
 
-    # Управляющие символы ASCII 0-31 и DEL
+    # Remove ASCII control characters 0-31 and DEL.
+    # (Удаляем управляющие символы ASCII 0-31 и DEL.)
     $NewName = [regex]::Replace($NewName, '[\x00-\x1F\x7F]', '')
 
-    # SOFT HYPHEN невидим в большинстве интерфейсов: делаем его явным.
+    # SOFT HYPHEN is invisible in most interfaces; make it explicit.
+    # (SOFT HYPHEN невидим в большинстве интерфейсов; делаем его явным.)
     $NewName = $NewName.Replace(([char]0x00AD).ToString(), "-")
 
     # --------------------------------------------------------
-    # Unicode-аналоги символов, способных создавать проблемы
-    # в Windows / SCP / SFTP.
+    # Unicode variants of characters that can cause problems with
+    # Windows, SCP, or SFTP.
+    # (Unicode-аналоги символов, способных создавать проблемы
+    # в Windows, SCP или SFTP.)
     #
-    # В частности:
+    # In particular (В частности):
     #   ：  U+FF1A FULLWIDTH COLON
     #   ／  U+FF0F FULLWIDTH SOLIDUS
     #   ＼  U+FF3C FULLWIDTH REVERSE SOLIDUS
@@ -166,23 +189,28 @@ function Convert-ToSafeName {
     #   ＞  U+FF1E FULLWIDTH GREATER-THAN SIGN
     #   ＂  U+FF02 FULLWIDTH QUOTATION MARK
     #
-    # Также учитываем несколько похожих slash/colon символов.
+    # Also handle several similar slash and colon characters.
+    # (Также обрабатываем несколько похожих символов slash и colon.)
     # --------------------------------------------------------
 
-    # Colon-like -> безопасный разделитель
+    # Colon-like characters -> safe separator.
+    # (Символы, похожие на colon, -> безопасный разделитель.)
     $NewName = $NewName.Replace(([char]0xFF1A).ToString(), " - ") # ：
     $NewName = $NewName.Replace(([char]0xFE55).ToString(), " - ") # ﹕
 
-    # Slash-like -> безопасный разделитель
+    # Slash-like characters -> safe separator.
+    # (Символы, похожие на slash, -> безопасный разделитель.)
     $NewName = $NewName.Replace(([char]0xFF0F).ToString(), " - ") # ／
     $NewName = $NewName.Replace(([char]0xFF3C).ToString(), " - ") # ＼
     $NewName = $NewName.Replace(([char]0xFE68).ToString(), " - ") # ﹨
 
-    # Pipe-like
+    # Pipe-like characters. (Символы, похожие на pipe.)
     $NewName = $NewName.Replace(([char]0xFF5C).ToString(), " - ") # ｜
 
-    # Compatibility-варианты запрещённых question/asterisk/angle/quote
-    # заменяем пробелами. Безопасную языковую пунктуацию сохраняем.
+    # Replace compatibility variants of forbidden question, asterisk, angle,
+    # and quote characters with spaces. Preserve safe linguistic punctuation.
+    # (Заменяем пробелами compatibility-варианты запрещённых символов question,
+    # asterisk, angle и quote. Безопасную языковую пунктуацию сохраняем.)
     $NewName = $NewName.Replace(([char]0xFF1F).ToString(), " ") # ？
     $NewName = $NewName.Replace(([char]0xFE56).ToString(), " ") # ﹖
     $NewName = $NewName.Replace(([char]0xFF0A).ToString(), " ") # ＊
@@ -193,56 +221,72 @@ function Convert-ToSafeName {
     $NewName = $NewName.Replace(([char]0xFE65).ToString(), " ") # ﹥
     $NewName = $NewName.Replace(([char]0xFF02).ToString(), " ") # ＂
 
-    # Запятые в Common cleanup и Strict post-pass НЕ трогаем.
-    # Они допустимы в Windows/Linux и полезны для читаемости имён.
-    # Unicode-варианты запятых также сохраняются.
+    # Common cleanup and Strict post-pass do not modify commas. They are valid
+    # on Windows/Linux and improve readability. Preserve Unicode comma variants too.
+    # (Common cleanup и Strict post-pass не изменяют запятые. Они допустимы
+    # в Windows/Linux и улучшают читаемость. Unicode-варианты запятых тоже сохраняются.)
 
     # --------------------------------------------------------
-    # Обычные символы, запрещённые Windows
-    # или потенциально проблемные для транспорта файлов
+    # Standard characters forbidden by Windows or potentially
+    # problematic for file transfer
+    # (Обычные символы, запрещённые Windows или потенциально
+    # проблемные для передачи файлов)
     # --------------------------------------------------------
 
     $NewName = $NewName -replace ':', ' - '
     $NewName = $NewName -replace '[\\/|]', ' - '
-    # Запрещённые ASCII-знаки разделяют соседний текст.
+    # Forbidden ASCII characters separate adjacent text.
+    # (Запрещённые ASCII-символы разделяют соседний текст.)
     $NewName = $NewName -replace '[<>"]', ' '
     $NewName = $NewName -replace '[?*]', ' '
 
     # --------------------------------------------------------
-    # Безопасная языковая пунктуация
+    # Safe linguistic punctuation (Безопасная языковая пунктуация)
     # --------------------------------------------------------
 
-    # Common cleanup сохраняет типографские кавычки, апострофы, primes,
-    # смысловые slash/pipe/colon-символы, variation selectors и combining
-    # marks. NFC уже применён выше; глобальную NFKC не используем.
+    # Common cleanup preserves typographic quotation marks, apostrophes, primes,
+    # meaningful slash/pipe/colon characters, variation selectors, and combining
+    # marks. NFC was already applied above; global NFKC is not used.
+    # (Common cleanup сохраняет типографские кавычки, апострофы, primes,
+    # смысловые символы slash/pipe/colon, variation selectors и combining marks.
+    # NFC уже применён выше; глобальную NFKC не используем.)
 
     # --------------------------------------------------------
-    # Strict post-pass: уменьшение количества shell-sensitive
-    # metacharacters. Это не отменяет обязательное quoting имён файлов.
+    # Strict post-pass reduces shell-sensitive metacharacters. File names
+    # must still be quoted when passed to a shell.
+    # (Strict post-pass уменьшает количество shell-sensitive metacharacters.
+    # При передаче оболочке имена файлов по-прежнему необходимо заключать в кавычки.)
     # --------------------------------------------------------
 
     if ($StrictMode) {
-        # Все распространённые варианты апострофа приводим к U+02BC.
-        # Он сохраняет визуальное разделение и не является ASCII quote.
+        # Normalize common apostrophe variants to U+02BC. It preserves visual
+        # separation and is not an ASCII quote.
+        # (Приводим распространённые варианты апострофа к U+02BC. Он сохраняет
+        # визуальное разделение и не является ASCII quote.)
         $NewName = [regex]::Replace(
             $NewName,
             '[\u0027\u2018-\u201B\u02BC\uFF07]',
             ([char]0x02BC).ToString()
         )
 
-        # Shell grouping, glob и brace characters -> разделитель.
+        # Shell grouping, glob, and brace characters -> separator.
+        # (Shell grouping, glob и brace characters -> разделитель.)
         $NewName = $NewName -replace '[\(\)\[\]\{\}]', ' '
 
-        # Закрывающая скобка перед сохраняемой запятой не должна оставлять
-        # искусственный пробел: "[Live]," -> "Live,".
+        # A closing bracket before a preserved comma must not leave an
+        # artificial space: "[Live]," -> "Live,".
+        # (Закрывающая скобка перед сохраняемой запятой не должна оставлять
+        # искусственный пробел: "[Live]," -> "Live,".)
         $NewName = [regex]::Replace(
             $NewName,
             '\s+(?=[,\uFF0C\uFE50\u3001\u060C])',
             ''
         )
 
-        # Видимые метасимволы заменяем, а не удаляем без разделителя.
-        # Плюс служит языково-нейтральной заменой ampersand.
+        # Replace visible metacharacters instead of removing them without a
+        # separator. A plus sign is a language-neutral ampersand replacement.
+        # (Заменяем видимые метасимволы, а не удаляем их без разделителя.
+        # Знак плюса служит языково-нейтральной заменой ampersand.)
         $NewName = $NewName -replace ';', ' '
         $NewName = $NewName -replace '&', ' + '
         $NewName = [regex]::Replace(
@@ -253,24 +297,27 @@ function Convert-ToSafeName {
     }
 
     # --------------------------------------------------------
-    # Нормализация пробелов и разделителей
+    # Space and separator normalization
+    # (Нормализация пробелов и разделителей)
     # --------------------------------------------------------
 
     $NewName = [regex]::Replace($NewName, '\s+', ' ')
     $NewName = [regex]::Replace($NewName, '\s*-\s*-\s*', ' - ')
     $NewName = $NewName.Trim()
 
-    # Windows не допускает точки и пробелы в конце имени.
+    # Windows does not allow trailing periods or spaces in a name.
+    # (Windows не допускает точки и пробелы в конце имени.)
     $NewName = $NewName.TrimEnd([char[]]@('.', ' '))
 
-    # Повторная нормализация после всех замен.
+    # Normalize again after all replacements.
+    # (Повторно нормализуем после всех замен.)
     $NewName = [regex]::Replace($NewName, '\s+', ' ').Trim()
 
     if ([string]::IsNullOrWhiteSpace($NewName)) {
         $NewName = "unnamed"
     }
 
-    # Зарезервированные имена Windows.
+    # Reserved Windows names. (Зарезервированные имена Windows.)
     $ReservedCheck = $NewName
 
     if ($ReservedCheck.Contains(".")) {
@@ -285,7 +332,7 @@ function Convert-ToSafeName {
 }
 
 # ------------------------------------------------------------
-# Размер строки в UTF-8 байтах
+# String size in UTF-8 bytes (Размер строки в UTF-8 байтах)
 # ------------------------------------------------------------
 
 function Get-Utf8ByteCount {
@@ -295,13 +342,16 @@ function Get-Utf8ByteCount {
         [string]$Value
     )
 
-    # Строгий encoder также проверяет корректность UTF-16: одиночные
-    # surrogate code units не заменяются символом U+FFFD незаметно.
+    # The strict encoder also validates UTF-16: unpaired surrogate code units
+    # are not silently replaced with U+FFFD.
+    # (Строгий encoder также проверяет UTF-16: одиночные surrogate code units
+    # не заменяются незаметно символом U+FFFD.)
     return $Utf8EncodingStrict.GetByteCount($Value)
 }
 
 # ------------------------------------------------------------
-# Безопасное усечение строки по размеру в UTF-8
+# Unicode-safe truncation by UTF-8 byte size
+# (Безопасное для Unicode усечение по размеру в UTF-8 байтах)
 # ------------------------------------------------------------
 
 function Limit-StringToUtf8ByteCount {
@@ -324,9 +374,12 @@ function Limit-StringToUtf8ByteCount {
     $Builder = New-Object System.Text.StringBuilder
     $UsedBytes = 0
 
-    # Перебираем Unicode text elements, а не UTF-16 code units.
-    # Поэтому усечение не разрезает surrogate pair и по возможности
-    # сохраняет базовый символ вместе с его combining marks.
+    # Iterate over Unicode text elements rather than UTF-16 code units. This
+    # prevents splitting a surrogate pair and preserves a base character with
+    # its combining marks whenever possible.
+    # (Перебираем Unicode text elements, а не UTF-16 code units. Поэтому
+    # усечение не разрезает surrogate pair и по возможности сохраняет
+    # базовый символ вместе с его combining marks.)
     $Enumerator = [System.Globalization.StringInfo]::GetTextElementEnumerator(
         $Value
     )
@@ -347,7 +400,8 @@ function Limit-StringToUtf8ByteCount {
 }
 
 # ------------------------------------------------------------
-# Ограничение полного имени файла с сохранением расширения
+# Full file name limit with extension preservation
+# (Ограничение полного имени файла с сохранением расширения)
 # ------------------------------------------------------------
 
 function Limit-FileNameToUtf8ByteCount {
@@ -371,8 +425,10 @@ function Limit-FileNameToUtf8ByteCount {
         return $FullName
     }
 
-    # Сначала сохраняем расширение целиком и отдаём оставшийся byte budget
-    # базовой части имени.
+    # Preserve the complete extension first and give the remaining byte budget
+    # to the base name.
+    # (Сначала сохраняем расширение целиком и отдаём оставшийся byte budget
+    # базовой части имени.)
     $ExtensionBytes = Get-Utf8ByteCount -Value $Extension
     $AvailableBaseBytes = $MaxUtf8Bytes - $ExtensionBytes
     $LimitedBaseName = ""
@@ -391,10 +447,13 @@ function Limit-FileNameToUtf8ByteCount {
         return "$LimitedBaseName$Extension"
     }
 
-    # Полное расширение иногда не оставляет места даже для одного
-    # пригодного text element базового имени. В этом редком случае
-    # сохраняем безопасную базовую часть и максимально возможный префикс
-    # расширения. Это гарантирует соблюдение лимита и непустое имя.
+    # A complete extension may leave no room for even one usable text element
+    # in the base name. In this rare case, preserve a safe base and the longest
+    # possible extension prefix. This guarantees a non-empty name within the limit.
+    # (Полное расширение иногда не оставляет места даже для одного пригодного
+    # text element базового имени. В этом редком случае сохраняем безопасную
+    # базовую часть и максимально возможный префикс расширения. Это гарантирует
+    # соблюдение лимита и непустое имя.)
     $FallbackBaseName = Limit-StringToUtf8ByteCount `
         -Value "unnamed" `
         -MaxUtf8Bytes $MaxUtf8Bytes
@@ -409,7 +468,8 @@ function Limit-FileNameToUtf8ByteCount {
 }
 
 # ------------------------------------------------------------
-# Формирование имени с конфликтным суффиксом
+# Name generation with a conflict suffix
+# (Формирование имени с конфликтным суффиксом)
 # ------------------------------------------------------------
 
 function New-ConflictCandidateName {
@@ -431,19 +491,24 @@ function New-ConflictCandidateName {
         [int]$MaxUtf8Bytes
     )
 
-    # Суффикс строится заново для каждого значения счётчика. Поэтому
-    # переходы (9) -> (10) и (99) -> (100) автоматически уменьшают
-    # доступный базовой части byte budget на фактическую разницу.
+    # Rebuild the suffix for every counter value. Transitions from (9) to (10)
+    # and from (99) to (100) therefore reduce the base-name byte budget by the
+    # actual difference.
+    # (Суффикс строится заново для каждого значения счётчика. Поэтому переходы
+    # (9) -> (10) и (99) -> (100) уменьшают byte budget базовой части
+    # на фактическую разницу.)
     $ConflictSuffix = " ($Counter)"
     $SuffixBytes = Get-Utf8ByteCount -Value $ConflictSuffix
     $AvailableNameBytes = $MaxUtf8Bytes - $SuffixBytes
 
     if ($AvailableNameBytes -lt 1) {
-        throw "Конфликтный суффикс не помещается в лимит имени."
+        throw "The conflict suffix does not fit within the name limit. (Конфликтный суффикс не помещается в лимит имени.)"
     }
 
-    # Расширение сохраняем полностью, когда вместе с суффиксом оно
-    # оставляет место хотя бы для одного пригодного text element базы.
+    # Preserve the complete extension when it and the suffix leave room for at
+    # least one usable text element in the base name.
+    # (Сохраняем расширение полностью, когда вместе с суффиксом оно оставляет
+    # место хотя бы для одного пригодного text element базовой части.)
     $ExtensionBytes = Get-Utf8ByteCount -Value $Extension
     $AvailableBaseBytes = $AvailableNameBytes - $ExtensionBytes
     $LimitedBaseName = ""
@@ -462,9 +527,12 @@ function New-ConflictCandidateName {
         return "$LimitedBaseName$ConflictSuffix$Extension"
     }
 
-    # Если полное расширение не оставляет места для базы, используем
-    # минимальную безопасную однобайтовую базу. Остаток отдаём расширению:
-    # его префикс усекается только по границам Unicode text elements.
+    # If the complete extension leaves no room for the base, use a minimal safe
+    # one-byte base. Give the remainder to the extension and truncate its prefix
+    # only at Unicode text element boundaries.
+    # (Если полное расширение не оставляет места для базы, используем минимальную
+    # безопасную однобайтовую базу. Остаток отдаём расширению и усекаем его префикс
+    # только по границам Unicode text elements.)
     $FallbackBaseName = "_"
     $FallbackBytes = Get-Utf8ByteCount -Value $FallbackBaseName
     $AvailableExtensionBytes = $AvailableNameBytes - $FallbackBytes
@@ -476,7 +544,8 @@ function New-ConflictCandidateName {
 }
 
 # ------------------------------------------------------------
-# Получение уникального имени при совпадениях
+# Unique name selection for conflicts
+# (Выбор уникального имени при конфликтах)
 # ------------------------------------------------------------
 
 function Get-UniqueName {
@@ -502,10 +571,13 @@ function Get-UniqueName {
         $BaseName = [System.IO.Path]::GetFileNameWithoutExtension($NewName)
     }
 
-    # Для файлов входное имя уже ограничено в Process-File. Повторное
-    # ограничение здесь также гарантирует лимит при прямом вызове функции.
-    # Для каталогов эта проверка не позволяет вернуть длинный кандидат
-    # ещё до появления первого конфликтного суффикса.
+    # Process-File already limits its input name. Applying the limit again here
+    # also guarantees it for direct function calls. For directories, this check
+    # prevents returning an oversized candidate before the first conflict suffix.
+    # (Process-File уже ограничивает входное имя. Повторное ограничение здесь
+    # также гарантирует лимит при прямом вызове функции. Для каталогов эта
+    # проверка не позволяет вернуть слишком длинный кандидат до появления
+    # первого конфликтного суффикса.)
     $Candidate = Limit-FileNameToUtf8ByteCount `
         -BaseName $BaseName `
         -Extension $Extension `
@@ -542,7 +614,8 @@ function Get-UniqueName {
 }
 
 # ------------------------------------------------------------
-# Snapshot и виртуальное состояние имён
+# Filename snapshot and virtual state
+# (Снимок состояния и виртуальное состояние имён)
 # ------------------------------------------------------------
 
 function Get-OriginalRelativePath {
@@ -562,7 +635,7 @@ function Get-OriginalRelativePath {
         $RootPrefix,
         [System.StringComparison]::OrdinalIgnoreCase
     )) {
-        throw "Объект находится вне корневого каталога: $FullName"
+        throw "Object is outside the root directory (Объект находится вне корневого каталога): $FullName"
     }
 
     return $FullName.Substring($RootPrefix.Length)
@@ -595,8 +668,10 @@ function New-SnapshotState {
     $DirectoryOwnerByPath.Add($RootPath, $RootOwnerId)
     $NextOwnerNumber = 1
 
-    # Сначала назначаем ID всем каталогам, чтобы ParentOwnerId не зависел
-    # от порядка, в котором Get-ChildItem вернул вложенные каталоги.
+    # Assign IDs to all directories first so ParentOwnerId does not depend on
+    # the order in which Get-ChildItem returned nested directories.
+    # (Сначала назначаем ID всем каталогам, чтобы ParentOwnerId не зависел
+    # от порядка, в котором Get-ChildItem вернул вложенные каталоги.)
     foreach ($Directory in $Directories) {
         $OwnerId = "D:$NextOwnerNumber"
         $NextOwnerNumber++
@@ -629,7 +704,7 @@ function New-SnapshotState {
             $Record.ParentFullName,
             [ref]$ParentOwnerId
         )) {
-            throw "Не найден snapshot-владелец родителя: $($Record.ParentFullName)"
+            throw "Snapshot parent owner was not found (Не найден владелец родительского каталога в snapshot): $($Record.ParentFullName)"
         }
 
         $Record.ParentOwnerId = $ParentOwnerId
@@ -644,7 +719,7 @@ function New-SnapshotState {
             $File.DirectoryName,
             [ref]$ParentOwnerId
         )) {
-            throw "Не найден snapshot-владелец родителя: $($File.DirectoryName)"
+            throw "Snapshot parent owner was not found (Не найден владелец родительского каталога в snapshot): $($File.DirectoryName)"
         }
 
         $RelativePath = Get-OriginalRelativePath -FullName $File.FullName
@@ -665,9 +740,12 @@ function New-SnapshotState {
         [void]$FileRecords.Add($Record)
     }
 
-    # Файлы и каталоги одного родителя используют общий namespace.
-    # OrdinalIgnoreCase соответствует текущей Windows-политике имён;
-    # дополнительную Unicode-нормализацию comparer намеренно не делает.
+    # Files and directories under one parent share a namespace.
+    # OrdinalIgnoreCase matches the current Windows name policy; the comparer
+    # intentionally performs no additional Unicode normalization.
+    # (Файлы и каталоги одного родителя используют единое пространство имён.
+    # OrdinalIgnoreCase соответствует текущей Windows-политике имён; comparer
+    # намеренно не выполняет дополнительную Unicode-нормализацию.)
     foreach ($Record in @($DirectoryRecords) + @($FileRecords)) {
         if (-not $Namespaces.ContainsKey($Record.ParentOwnerId)) {
             $Namespace = New-Object `
@@ -766,7 +844,7 @@ function Set-VirtualName {
             [System.StringComparison]::Ordinal
         )
     ) {
-        throw "Нарушено внутреннее состояние владельца имени."
+        throw "Internal filename ownership state is inconsistent. (Нарушено внутреннее состояние владельца имени.)"
     }
 
     $TargetOwnerId = $null
@@ -779,18 +857,20 @@ function Set-VirtualName {
             [System.StringComparison]::Ordinal
         )
     ) {
-        throw "Целевое имя уже занято другим владельцем."
+        throw "Target name is already occupied by another owner. (Целевое имя уже занято другим владельцем.)"
     }
 
-    # Remove + Add нужны и для case-only rename: comparer считает старое и
-    # новое написание одним ключом, но state должен хранить выбранный регистр.
+    # Remove + Add are also required for a case-only rename: the comparer treats
+    # both spellings as one key, but the state must preserve the selected case.
+    # (Remove + Add нужны и для переименования только по регистру: comparer
+    # считает оба написания одним ключом, но state должен сохранять выбранный регистр.)
     [void]$Namespace.Remove($Record.CurrentVirtualName)
     $Namespace.Add($NewName, $Record.OwnerId)
     $Record.CurrentVirtualName = $NewName
 }
 
 # ------------------------------------------------------------
-# Обработка файла
+# File processing (Обработка файла)
 # ------------------------------------------------------------
 
 function Process-File {
@@ -804,9 +884,11 @@ function Process-File {
 
     $OriginalName = $File.Name
 
-    # Одиночная ведущая точка обозначает dotfile, а не расширение.
-    # Для остальных имён сохраняем прежнюю семантику последней точки:
+    # A single leading period denotes a dotfile, not an extension. Preserve the
+    # existing last-period semantics for all other names:
     # .config.json -> .config + .json, archive.tar.gz -> archive.tar + .gz.
+    # (Одиночная ведущая точка обозначает dotfile, а не расширение. Для остальных
+    # имён сохраняем прежнюю семантику последней точки.)
     $IsSimpleDotfile = (
         $OriginalName.Length -gt 1 -and
         $OriginalName[0] -eq [char]0x002E -and
@@ -830,28 +912,37 @@ function Process-File {
 
     $SafeBaseName = Convert-ToSafeName -Name $BaseName -StrictMode:$Strict
 
-    # Ведущую точку не пропускаем через очистку: нормализуем только body.
-    # В отличие от старого category allowlist, эта политика сохраняет
-    # национальные буквы, combining marks, emoji и безопасные символы Unicode.
+    # Do not pass the leading period through sanitization; normalize only the body.
+    # Unlike the former category allowlist, this policy preserves national letters,
+    # combining marks, emoji, and safe Unicode characters.
+    # (Не пропускаем ведущую точку через очистку; нормализуем только body.
+    # В отличие от прежнего category allowlist, эта политика сохраняет национальные
+    # буквы, combining marks, emoji и безопасные символы Unicode.)
     $SafeExtension = ""
 
     if (-not [string]::IsNullOrEmpty($Extension)) {
         $ExtensionBody = $Extension.Substring(1)
 
-        # NFC применяется только к extension body. Глобальную NFKC
-        # не используем, чтобы не менять совместимые Unicode-символы.
+        # Apply NFC only to the extension body. Do not use global NFKC, which
+        # could change compatibility Unicode characters.
+        # (Применяем NFC только к extension body. Глобальную NFKC не используем,
+        # чтобы не менять compatibility-символы Unicode.)
         try {
             $ExtensionBody = $ExtensionBody.Normalize(
                 [System.Text.NormalizationForm]::FormC
             )
         }
         catch {
-            # Если конкретная строка не нормализуется, продолжаем очистку.
+            # Continue sanitization when a particular string cannot be normalized.
+            # (Если конкретная строка не нормализуется, продолжаем очистку.)
         }
 
-        # Controls, bidi formatting, WORD JOINER, BOM и ZWSP не несут
-        # полезной информации для расширения. ZWNJ, ZWJ, variation selectors
-        # и combining marks намеренно не входят в удаляемые наборы.
+        # Controls, bidi formatting, WORD JOINER, BOM, and ZWSP carry no useful
+        # extension information. ZWNJ, ZWJ, variation selectors, and combining
+        # marks are intentionally excluded from the removal sets.
+        # (Controls, bidi formatting, WORD JOINER, BOM и ZWSP не несут полезной
+        # информации для расширения. ZWNJ, ZWJ, variation selectors и combining
+        # marks намеренно не входят в удаляемые наборы.)
         $ExtensionBody = [regex]::Replace(
             $ExtensionBody,
             '[\x00-\x1F\x7F]',
@@ -866,8 +957,10 @@ function Process-File {
         $ExtensionBody = $ExtensionBody.Replace(([char]0x2060).ToString(), "")
         $ExtensionBody = $ExtensionBody.Replace(([char]0xFEFF).ToString(), "")
 
-        # Пробелы и запрещённые Windows символы в extension body удаляем,
-        # не превращая короткое расширение в отдельную фразу с разделителями.
+        # Remove spaces and Windows-forbidden characters from the extension body
+        # without turning a short extension into a phrase with separators.
+        # (Удаляем пробелы и запрещённые Windows символы из extension body,
+        # не превращая короткое расширение в отдельную фразу с разделителями.)
         $ExtensionBody = [regex]::Replace($ExtensionBody, '\s+', '')
         $ExtensionBody = [regex]::Replace(
             $ExtensionBody,
@@ -882,9 +975,12 @@ function Process-File {
             ''
         )
 
-        # Strict post-pass для extension body также только уменьшает
-        # количество shell-sensitive metacharacters. Quoting полного имени
-        # по-прежнему обязателен. Пробелы в расширение не добавляем.
+        # The Strict post-pass for the extension body also only reduces
+        # shell-sensitive metacharacters. The complete name must still be quoted.
+        # Do not add spaces to the extension.
+        # (Strict post-pass для extension body также только уменьшает количество
+        # shell-sensitive metacharacters. Полное имя по-прежнему необходимо
+        # заключать в кавычки. Пробелы в расширение не добавляем.)
         if ($Strict) {
             $ExtensionBody = [regex]::Replace(
                 $ExtensionBody,
@@ -899,15 +995,18 @@ function Process-File {
             $ExtensionBody = $ExtensionBody.Replace("&", "+")
         }
 
-        # Не оставляем одиночную ведущую точку, если body полностью очищен.
+        # Do not leave a lone leading period when the body was completely removed.
+        # (Не оставляем одиночную ведущую точку, если body полностью очищен.)
         if (-not [string]::IsNullOrEmpty($ExtensionBody)) {
             $SafeExtension = ".$ExtensionBody"
         }
     }
 
-    # ext4 допускает до 255 байт на один компонент имени. Здесь ограничиваем
-    # исходный кандидат; Get-UniqueName отдельно пересчитает точный бюджет,
-    # если к имени потребуется добавить конфликтный суффикс.
+    # ext4 allows up to 255 bytes per name component. Limit the initial candidate
+    # here; Get-UniqueName recalculates the exact budget if a conflict suffix is needed.
+    # (ext4 допускает до 255 байт на один компонент имени. Здесь ограничиваем
+    # исходный кандидат; Get-UniqueName пересчитывает точный бюджет, если потребуется
+    # добавить конфликтный суффикс.)
     $MaxFileNameUtf8Bytes = 255
 
     $NewName = Limit-FileNameToUtf8ByteCount `
@@ -915,11 +1014,14 @@ function Process-File {
         -Extension $SafeExtension `
         -MaxUtf8Bytes $MaxFileNameUtf8Bytes
 
-    # ВАЖНО: используем точное ordinal-сравнение.
-    # PowerShell -eq/-ceq может считать канонически эквивалентные
-    # Unicode-строки одинаковыми, например:
+    # IMPORTANT: use an exact ordinal comparison. PowerShell -eq/-ceq may treat
+    # canonically equivalent Unicode strings as equal, for example:
     #   "и" + U+0306  и  "й"
-    # Нам нужно обнаруживать такую разницу и физически нормализовать имя.
+    # The difference must be detected so the physical name is normalized.
+    # (ВАЖНО: используем точное ordinal-сравнение. PowerShell -eq/-ceq может считать
+    # канонически эквивалентные Unicode-строки одинаковыми, например:
+    #   "и" + U+0306  и  "й"
+    # Эту разницу необходимо обнаружить, чтобы физически нормализовать имя.)
     if ([string]::Equals(
         $OriginalName,
         $NewName,
@@ -939,14 +1041,16 @@ function Process-File {
         -OwnerId $Record.OwnerId
 
     Write-Host ""
-    Write-Host "ФАЙЛ:" -ForegroundColor Cyan
-    Write-Host "  Было:  " -NoNewline
+    Write-Host "FILE (ФАЙЛ):" -ForegroundColor Cyan
+    Write-Host "  Before (Было):  " -NoNewline
     Write-Host $OriginalName -ForegroundColor Yellow
-    Write-Host "  Будет: " -NoNewline
+    Write-Host "  After (Будет):  " -NoNewline
     Write-Host $NewName -ForegroundColor Green
 
-    # Если различие вызвано только Unicode-нормализацией,
-    # отдельно сообщаем об этом: визуально имена могут выглядеть одинаково.
+    # Report changes caused only by Unicode normalization separately because the
+    # names may look identical.
+    # (Отдельно сообщаем об изменениях только из-за Unicode-нормализации, поскольку
+    # имена могут выглядеть одинаково.)
     try {
         $NormalizedOriginal = $OriginalName.Normalize(
             [System.Text.NormalizationForm]::FormC
@@ -964,15 +1068,17 @@ function Process-File {
                 [System.StringComparison]::Ordinal
             )
         ) {
-            Write-Host "  Причина: Unicode NFC normalization" -ForegroundColor DarkYellow
+            Write-Host "  Reason: Unicode NFC normalization (Причина: нормализация Unicode NFC)" -ForegroundColor DarkYellow
         }
     }
     catch {
     }
 
     if (-not $Apply) {
-        # Dry Run моделирует успешный последовательный Apply: старое имя
-        # освобождается и выбранная цель резервируется немедленно.
+        # Dry Run models a successful sequential Apply: release the old name and
+        # reserve the selected target immediately.
+        # (Dry Run моделирует успешный последовательный Apply: старое имя
+        # освобождается, а выбранная цель резервируется немедленно.)
         Set-VirtualName -Record $Record -NewName $NewName
         return
     }
@@ -983,20 +1089,21 @@ function Process-File {
             -NewName $NewName `
             -ErrorAction Stop
 
-        # В Apply state меняется только после успешного Rename-Item.
+        # In Apply, update the state only after a successful Rename-Item.
+        # (В Apply обновляем state только после успешного Rename-Item.)
         Set-VirtualName -Record $Record -NewName $NewName
         $Stats.Renamed++
     }
     catch {
         $Stats.Errors++
 
-        Write-Host "  ОШИБКА ПЕРЕИМЕНОВАНИЯ:" -ForegroundColor Red
+        Write-Host "  RENAME ERROR (ОШИБКА ПЕРЕИМЕНОВАНИЯ):" -ForegroundColor Red
         Write-Host "  $($_.Exception.Message)" -ForegroundColor Red
     }
 }
 
 # ------------------------------------------------------------
-# Обработка каталога
+# Directory processing (Обработка каталога)
 # ------------------------------------------------------------
 
 function Process-Directory {
@@ -1011,9 +1118,12 @@ function Process-Directory {
     $OriginalName = $Directory.Name
     $NewName = Convert-ToSafeName -Name $OriginalName -StrictMode:$Strict
 
-    # ext4 допускает максимум 255 UTF-8 байт на один компонент имени.
-    # Для каталога расширения нет, поэтому ограничиваем очищенное имя
-    # напрямую по границам Unicode text elements до сравнения с исходным.
+    # ext4 allows up to 255 UTF-8 bytes per name component. A directory has no
+    # extension, so limit the sanitized name directly at Unicode text element
+    # boundaries before comparing it with the original.
+    # (ext4 допускает максимум 255 UTF-8 байт на один компонент имени. У каталога
+    # нет расширения, поэтому ограничиваем очищенное имя непосредственно
+    # по границам Unicode text elements до сравнения с исходным.)
     $MaxDirectoryNameUtf8Bytes = 255
     $NewName = Limit-StringToUtf8ByteCount `
         -Value $NewName `
@@ -1025,11 +1135,14 @@ function Process-Directory {
         $NewName = "unnamed"
     }
 
-    # ВАЖНО: используем точное ordinal-сравнение.
-    # PowerShell -eq/-ceq может считать канонически эквивалентные
-    # Unicode-строки одинаковыми, например:
+    # IMPORTANT: use an exact ordinal comparison. PowerShell -eq/-ceq may treat
+    # canonically equivalent Unicode strings as equal, for example:
     #   "и" + U+0306  и  "й"
-    # Нам нужно обнаруживать такую разницу и физически нормализовать имя.
+    # The difference must be detected so the physical name is normalized.
+    # (ВАЖНО: используем точное ordinal-сравнение. PowerShell -eq/-ceq может считать
+    # канонически эквивалентные Unicode-строки одинаковыми, например:
+    #   "и" + U+0306  и  "й"
+    # Эту разницу необходимо обнаружить, чтобы физически нормализовать имя.)
     if ([string]::Equals(
         $OriginalName,
         $NewName,
@@ -1050,14 +1163,16 @@ function Process-Directory {
         -IsDirectory
 
     Write-Host ""
-    Write-Host "ПАПКА:" -ForegroundColor Magenta
-    Write-Host "  Было:  " -NoNewline
+    Write-Host "DIRECTORY (КАТАЛОГ):" -ForegroundColor Magenta
+    Write-Host "  Before (Было):  " -NoNewline
     Write-Host $OriginalName -ForegroundColor Yellow
-    Write-Host "  Будет: " -NoNewline
+    Write-Host "  After (Будет):  " -NoNewline
     Write-Host $NewName -ForegroundColor Green
 
-    # Если различие вызвано только Unicode-нормализацией,
-    # отдельно сообщаем об этом: визуально имена могут выглядеть одинаково.
+    # Report changes caused only by Unicode normalization separately because the
+    # names may look identical.
+    # (Отдельно сообщаем об изменениях только из-за Unicode-нормализации, поскольку
+    # имена могут выглядеть одинаково.)
     try {
         $NormalizedOriginal = $OriginalName.Normalize(
             [System.Text.NormalizationForm]::FormC
@@ -1075,7 +1190,7 @@ function Process-Directory {
                 [System.StringComparison]::Ordinal
             )
         ) {
-            Write-Host "  Причина: Unicode NFC normalization" -ForegroundColor DarkYellow
+            Write-Host "  Reason: Unicode NFC normalization (Причина: нормализация Unicode NFC)" -ForegroundColor DarkYellow
         }
     }
     catch {
@@ -1098,36 +1213,39 @@ function Process-Directory {
     catch {
         $Stats.Errors++
 
-        Write-Host "  ОШИБКА ПЕРЕИМЕНОВАНИЯ:" -ForegroundColor Red
+        Write-Host "  RENAME ERROR (ОШИБКА ПЕРЕИМЕНОВАНИЯ):" -ForegroundColor Red
         Write-Host "  $($_.Exception.Message)" -ForegroundColor Red
     }
 }
 
 # ============================================================
-# Запуск
+# Execution (Запуск)
 # ============================================================
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host " ПРОВЕРКА ИМЁН ФАЙЛОВ" -ForegroundColor Cyan
+Write-Host " CLEAN FILE NAMES (ОЧИСТКА ИМЁН ФАЙЛОВ)" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Папка:              $RootPath"
-Write-Host "Строгий режим:      $Strict"
-Write-Host "Проверка каталогов: $IncludeDirectories"
+Write-Host "Folder (Папка):                         $RootPath"
+Write-Host "Strict mode (Строгий режим):            $Strict"
+Write-Host "Include directories (Обрабатывать каталоги): $IncludeDirectories"
 
 if ($Apply) {
-    Write-Host "Режим:              ПРИМЕНЕНИЕ ИЗМЕНЕНИЙ" -ForegroundColor Red
+    Write-Host "Mode (Режим): APPLY CHANGES (ПРИМЕНЕНИЕ ИЗМЕНЕНИЙ)" -ForegroundColor Red
 }
 else {
-    Write-Host "Режим:              ТОЛЬКО ПРОВЕРКА" -ForegroundColor Green
+    Write-Host "Mode (Режим): CHECK ONLY (ТОЛЬКО ПРОВЕРКА)" -ForegroundColor Green
 }
 
 Write-Host ""
 
-# Snapshot файлов и каталогов создаётся до первого Process-File и до любого
-# Rename-Item. Каталоги входят в snapshot даже без -IncludeDirectories,
-# потому что их имена занимают тот же namespace и блокируют цели файлов.
+# Build the file and directory snapshot before the first Process-File call and
+# before any Rename-Item. Include directories even without -IncludeDirectories
+# because their names occupy the same namespace and can block file targets.
+# (Создаём snapshot файлов и каталогов до первого вызова Process-File и до любого
+# Rename-Item. Включаем каталоги даже без -IncludeDirectories, поскольку их имена
+# занимают то же пространство имён и могут блокировать цели файлов.)
 try {
     $Files = @(
         Get-ChildItem `
@@ -1139,7 +1257,7 @@ try {
     )
 }
 catch {
-    Write-Host "Не удалось получить список файлов:" -ForegroundColor Red
+    Write-Host "Unable to enumerate files (Не удалось получить список файлов):" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
     exit 1
 }
@@ -1155,7 +1273,7 @@ try {
     )
 }
 catch {
-    Write-Host "Не удалось получить список каталогов:" -ForegroundColor Red
+    Write-Host "Unable to enumerate directories (Не удалось получить список каталогов):" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
     exit 1
 }
@@ -1175,13 +1293,14 @@ try {
     )
 }
 catch {
-    Write-Host "Не удалось построить snapshot имён:" -ForegroundColor Red
+    Write-Host "Unable to build filename snapshot (Не удалось построить снимок состояния имён):" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
     exit 1
 }
 
 # ------------------------------------------------------------
-# Файлы: исходный relative path, OrdinalIgnoreCase + Ordinal tie-breaker
+# Files: original relative path, OrdinalIgnoreCase + Ordinal tie-breaker
+# (Файлы: исходный relative path, OrdinalIgnoreCase + Ordinal tie-breaker)
 # ------------------------------------------------------------
 
 foreach ($Record in $FileRecords) {
@@ -1192,20 +1311,24 @@ foreach ($Record in $FileRecords) {
         $Stats.Errors++
 
         Write-Host ""
-        Write-Host "ОШИБКА ОБРАБОТКИ ФАЙЛА:" -ForegroundColor Red
+        Write-Host "FILE PROCESSING ERROR (ОШИБКА ОБРАБОТКИ ФАЙЛА):" -ForegroundColor Red
         Write-Host "  $($Record.OriginalFullName)" -ForegroundColor Yellow
         Write-Host "  $($_.Exception.Message)" -ForegroundColor Red
     }
 }
 
 # ------------------------------------------------------------
-# Каталоги: depth descending, затем те же relative-path comparers
+# Directories: descending depth, then the same relative-path comparers
+# (Каталоги: глубина по убыванию, затем те же relative-path comparers)
 # ------------------------------------------------------------
 
 if ($IncludeDirectories) {
-    # При deepest-first все дети обработаны до переименования родителя.
-    # Стабильный ParentOwnerId дополнительно сохраняет namespace независимо
-    # от того, как меняется физический путь каталога.
+    # With deepest-first ordering, all children are processed before their parent
+    # is renamed. A stable ParentOwnerId also preserves the namespace regardless
+    # of changes to the directory's physical path.
+    # (При порядке deepest-first все дочерние объекты обрабатываются до переименования
+    # родителя. Стабильный ParentOwnerId также сохраняет пространство имён независимо
+    # от изменений физического пути каталога.)
 
     foreach ($Record in $DirectoryRecords) {
         try {
@@ -1215,7 +1338,7 @@ if ($IncludeDirectories) {
             $Stats.Errors++
 
             Write-Host ""
-            Write-Host "ОШИБКА ОБРАБОТКИ ПАПКИ:" -ForegroundColor Red
+            Write-Host "DIRECTORY PROCESSING ERROR (ОШИБКА ОБРАБОТКИ КАТАЛОГА):" -ForegroundColor Red
             Write-Host "  $($Record.OriginalFullName)" -ForegroundColor Yellow
             Write-Host "  $($_.Exception.Message)" -ForegroundColor Red
         }
@@ -1223,22 +1346,22 @@ if ($IncludeDirectories) {
 }
 
 # ============================================================
-# Результат
+# Result (Результат)
 # ============================================================
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host " РЕЗУЛЬТАТ" -ForegroundColor Cyan
+Write-Host " RESULT (РЕЗУЛЬТАТ)" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Проверено:           $($Stats.Checked)"
-Write-Host "Требуют изменения:  $($Stats.NeedRename)"
-Write-Host "Переименовано:       $($Stats.Renamed)"
-Write-Host "Ошибок:              $($Stats.Errors)"
+Write-Host "Checked (Проверено):                   $($Stats.Checked)"
+Write-Host "Need rename (Требуют переименования):  $($Stats.NeedRename)"
+Write-Host "Renamed (Переименовано):               $($Stats.Renamed)"
+Write-Host "Errors (Ошибок):                       $($Stats.Errors)"
 Write-Host ""
 
 if (-not $Apply) {
-    Write-Host "Изменения НЕ применялись." -ForegroundColor Yellow
-    Write-Host "Для реального переименования добавьте параметр -Apply."
+    Write-Host "Changes were NOT applied (Изменения НЕ применялись)." -ForegroundColor Yellow
+    Write-Host "Add -Apply to perform actual renaming (Для реального переименования добавьте параметр -Apply)."
     Write-Host ""
 }
