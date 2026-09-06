@@ -17,7 +17,139 @@ Add-Type -AssemblyName System.Drawing
 
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
-$CoreScriptPath = Join-Path $PSScriptRoot "Clean-FileNames.ps1"
+$script:CoreSourceMode = $null
+$script:CoreText = $null
+$CoreScriptPath = $null
+
+function ConvertFrom-CoreUtf8Bytes {
+    param(
+        [Parameter(Mandatory = $true)]
+        [byte[]]$Bytes
+    )
+
+    $TextOffset = 0
+
+    # Both source modes use the same canonical text representation. Remove only
+    # an optional leading UTF-8 BOM before strict decoding.
+    # (Оба режима источника используют одинаковое каноническое представление
+    # текста. Перед строгим декодированием удаляем только начальный UTF-8 BOM.)
+    if ($Bytes.Length -ge 3 -and
+        $Bytes[0] -eq 0xEF -and
+        $Bytes[1] -eq 0xBB -and
+        $Bytes[2] -eq 0xBF) {
+        $TextOffset = 3
+    }
+
+    $StrictUtf8 = New-Object System.Text.UTF8Encoding($false, $true)
+    return $StrictUtf8.GetString(
+        $Bytes,
+        $TextOffset,
+        $Bytes.Length - $TextOffset
+    )
+}
+
+# A future generated build wrapper can define both script-level variables before
+# this GUI source. Source/development runs do not define them and keep using the
+# external core next to this file.
+# (Будущий generated build-wrapper может определить обе script-level переменные
+# перед этим GUI-кодом. При запуске из исходников они не определены, поэтому
+# по-прежнему используется внешнее ядро рядом с этим файлом.)
+$EmbeddedBase64Variable = Get-Variable `
+    -Name "CleanFileNamesEmbeddedCoreBase64" `
+    -Scope Script `
+    -ErrorAction SilentlyContinue
+$EmbeddedSha256Variable = Get-Variable `
+    -Name "CleanFileNamesEmbeddedCoreSha256" `
+    -Scope Script `
+    -ErrorAction SilentlyContinue
+
+if ($null -ne $EmbeddedBase64Variable -or $null -ne $EmbeddedSha256Variable) {
+    $script:CoreSourceMode = "Embedded"
+
+    if ($null -eq $EmbeddedBase64Variable -or
+        [string]::IsNullOrWhiteSpace([string]$EmbeddedBase64Variable.Value)) {
+        throw "Embedded core payload is missing.`r`n(Отсутствуют данные встроенного ядра.)"
+    }
+
+    if ($null -eq $EmbeddedSha256Variable -or
+        [string]::IsNullOrWhiteSpace([string]$EmbeddedSha256Variable.Value)) {
+        throw "Embedded core SHA-256 is missing.`r`n(Отсутствует SHA-256 встроенного ядра.)"
+    }
+
+    $ExpectedEmbeddedSha256 = ([string]$EmbeddedSha256Variable.Value).Trim()
+
+    if ($ExpectedEmbeddedSha256 -notmatch '\A[0-9A-Fa-f]{64}\z') {
+        throw "Embedded core SHA-256 has an invalid format.`r`n(SHA-256 встроенного ядра имеет неверный формат.)"
+    }
+
+    try {
+        $EmbeddedCoreBytes = [Convert]::FromBase64String(
+            [string]$EmbeddedBase64Variable.Value
+        )
+    }
+    catch {
+        throw "Embedded core payload is not valid Base64.`r`n(Данные встроенного ядра не являются корректным Base64.)`r`n`r`n$($_.Exception.Message)"
+    }
+
+    if ($EmbeddedCoreBytes.Length -eq 0) {
+        throw "Embedded core payload is empty.`r`n(Данные встроенного ядра пусты.)"
+    }
+
+    # The embedded hash detects accidental payload corruption during packaging
+    # or distribution. It is not a substitute for executable code signing.
+    # (Хэш встроенного ядра обнаруживает случайное повреждение payload при сборке
+    # или распространении. Он не заменяет цифровую подпись исполняемого файла.)
+    $EmbeddedCoreHashAlgorithm = `
+        [System.Security.Cryptography.SHA256]::Create()
+
+    try {
+        $ActualEmbeddedSha256 = [BitConverter]::ToString(
+            $EmbeddedCoreHashAlgorithm.ComputeHash($EmbeddedCoreBytes)
+        ).Replace("-", "")
+    }
+    finally {
+        $EmbeddedCoreHashAlgorithm.Dispose()
+    }
+
+    if (-not [string]::Equals(
+        $ActualEmbeddedSha256,
+        $ExpectedEmbeddedSha256,
+        [System.StringComparison]::OrdinalIgnoreCase
+    )) {
+        throw "Embedded core integrity check failed.`r`n(Проверка целостности встроенного ядра не пройдена.)"
+    }
+
+    try {
+        $script:CoreText = ConvertFrom-CoreUtf8Bytes -Bytes $EmbeddedCoreBytes
+    }
+    catch {
+        throw "Embedded core payload is not valid UTF-8.`r`n(Данные встроенного ядра не являются корректным UTF-8.)`r`n`r`n$($_.Exception.Message)"
+    }
+
+    if ([string]::IsNullOrEmpty($script:CoreText)) {
+        throw "Embedded core payload is empty.`r`n(Данные встроенного ядра пусты.)"
+    }
+}
+else {
+    $script:CoreSourceMode = "External"
+    $CoreScriptPath = Join-Path $PSScriptRoot "Clean-FileNames.ps1"
+
+    try {
+        if (-not (Test-Path -LiteralPath $CoreScriptPath -PathType Leaf)) {
+            throw "Core script was not found (Не найден файл основного скрипта): $CoreScriptPath"
+        }
+
+        $ExternalCoreBytes = [System.IO.File]::ReadAllBytes($CoreScriptPath)
+        $script:CoreText = ConvertFrom-CoreUtf8Bytes -Bytes $ExternalCoreBytes
+
+        if ([string]::IsNullOrEmpty($script:CoreText)) {
+            throw "Core script is empty. (Основной скрипт пуст.)"
+        }
+    }
+    catch {
+        throw "Core script could not be loaded.`r`n(Не удалось загрузить основной скрипт.)`r`n`r`n$($_.Exception.Message)"
+    }
+}
 
 # The adapter runs the existing CLI core in a separate runspace. This keeps
 # console output out of the GUI and prevents a CLI exit from closing the form.
@@ -25,7 +157,7 @@ $CoreScriptPath = Join-Path $PSScriptRoot "Clean-FileNames.ps1"
 # консольный текст в GUI и не позволяет CLI exit закрыть форму.)
 $CoreAdapterScript = @'
 param(
-    [string]$CorePath,
+    [string]$CoreText,
     [string]$TargetPath,
     [bool]$DoApply,
     [bool]$UseStrict,
@@ -50,7 +182,8 @@ if ($UseDirectories) {
     $CoreParameters.IncludeDirectories = $true
 }
 
-. $CorePath @CoreParameters *> $null
+$CoreScriptBlock = [scriptblock]::Create($CoreText)
+. $CoreScriptBlock @CoreParameters *> $null
 
 # Resolve planned paths through stable parent owner IDs so directory renames
 # are reflected in the Location column too.
@@ -149,15 +282,11 @@ function Invoke-CleanFileNamesCore {
         [switch]$IncludeDirectories
     )
 
-    if (-not (Test-Path -LiteralPath $CoreScriptPath -PathType Leaf)) {
-        throw "Core script was not found (Не найден файл основного скрипта): $CoreScriptPath"
-    }
-
     $PowerShell = [System.Management.Automation.PowerShell]::Create()
 
     try {
         [void]$PowerShell.AddScript($CoreAdapterScript)
-        [void]$PowerShell.AddArgument($CoreScriptPath)
+        [void]$PowerShell.AddArgument($script:CoreText)
         [void]$PowerShell.AddArgument($Path)
         [void]$PowerShell.AddArgument([bool]$Apply)
         [void]$PowerShell.AddArgument([bool]$Strict)
@@ -807,6 +936,10 @@ $Form.Add_Shown({ [void]$FolderTextBox.Focus() })
 # UI regression tests. Normal -File execution opens the application window.
 # (При dot-sourcing форма инициализируется без открытия, что позволяет выполнять
 # безопасные локальные UI regression tests. Обычный запуск через -File открывает окно.)
+# TODO: Packaged EXE launch behavior must be explicitly regression-tested after
+# a PS2EXE build because PS2EXE changes $MyInvocation semantics.
+# (TODO: после сборки PS2EXE нужно явно проверить запуск packaged EXE, поскольку
+# PS2EXE изменяет семантику $MyInvocation.)
 if ($MyInvocation.InvocationName -ne ".") {
     [System.Windows.Forms.Application]::Run($Form)
 }
