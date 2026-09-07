@@ -179,7 +179,7 @@ The build requires the pinned PS2EXE `1.0.18` module and runs tests by default. 
 
 `6.0.0-preview.1` is a prerelease candidate based on the v6 development line. It has automated coverage for the CLI, GUI logic, embedded/external core equivalence, conflict planning, Apply revalidation, cancellation, and packaging integrity. It should be tested with representative data before a stable release.
 
-The repository currently has no `LICENSE` file. No license has been selected as part of this release-preparation work.
+The project is licensed under the GNU General Public License v3.0 only (`GPL-3.0-only`). See [LICENSE](LICENSE).
 
 ## Known limitations
 
@@ -374,7 +374,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
 
 `6.0.0-preview.1` — кандидат на предварительный выпуск из ветки разработки v6. Автоматические тесты покрывают CLI, логику GUI, эквивалентность встроенного и внешнего ядра, планирование конфликтов, повторную проверку перед Apply, отмену и целостность упаковки. До стабильного выпуска программу следует проверить на репрезентативных данных.
 
-В репозитории пока нет файла `LICENSE`. В рамках этой подготовки выпуска лицензия не выбиралась.
+Проект распространяется только по GNU General Public License v3.0 (`GPL-3.0-only`). Полный текст лицензии: [LICENSE](LICENSE).
 
 ### Известные ограничения
 

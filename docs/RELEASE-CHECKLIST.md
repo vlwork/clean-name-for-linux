@@ -43,7 +43,7 @@ Use this checklist immediately before creating the GitHub prerelease. Leave plat
 - [ ] Confirm `git status --short` is empty before tagging.
 - [x] Confirm release notes describe an unsigned Windows x64 preview and match README limitations.
 - [x] Confirm no fabricated screenshot or placeholder image is included.
-- [ ] Select and add an appropriate project `LICENSE`; none is currently present.
+- [x] Select and add project `LICENSE`: `GPL-3.0-only`.
 - [ ] Review GitHub About description, topics, and website field.
 - [ ] Decide whether issue templates, contributing guidance, and a security policy are needed.
 - [ ] Commit the reviewed documentation and any separately approved release changes.
