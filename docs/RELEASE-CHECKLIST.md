@@ -8,7 +8,7 @@ Use this checklist immediately before creating the GitHub prerelease. Leave plat
 - [ ] Record and verify the final release commit after the reviewed documentation is committed.
 - [x] Confirm the main checkout was clean before release-preparation documentation changes.
 - [x] Parse core, GUI, regression suite, benchmark, and build script with Windows PowerShell 5.1: zero errors.
-- [x] Run the regression suite: 60 passed, 0 failed, exit code 0.
+- [x] Run the regression suite: 63 passed, 0 failed, exit code 0.
 - [x] Repeat regression and build from a separate clean checkout of the release commit.
 - [x] Review README commands, paths, switches, examples, links, and version references.
 - [x] Update `CHANGELOG.md` with an Unreleased preview entry.
