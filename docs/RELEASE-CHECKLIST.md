@@ -44,7 +44,7 @@ Use this checklist throughout release preparation, publication, and post-publica
 - [x] Confirm release notes describe an unsigned Windows x64 preview and match README limitations.
 - [x] Confirm no fabricated screenshot or placeholder image is included.
 - [x] Select and add project `LICENSE`: `GPL-3.0-only`.
-- [ ] Review GitHub About description, topics, and website field.
+- [x] Review GitHub About description, topics, and website field.
 - [ ] Decide whether issue templates, contributing guidance, and a security policy are needed.
 - [x] Commit the reviewed documentation and any separately approved release changes.
 - [x] Create tag `v6.0.0-preview.1` from the approved commit.
