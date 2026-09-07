@@ -32,3 +32,4 @@ The format is based on Keep a Changelog. This project is preparing a prerelease 
 - Conflict suffixes that could push file or directory names beyond the ext4 component limit.
 - Directory names that could bypass UTF-8 byte limiting when no other cleanup was required.
 - Dry-run conflict candidates that previously could differ from Apply for multiple future renames.
+- BIG SOLIDUS `U+29F8` (`⧸`) is now treated as a slash-like separator and normalized to ` - ` for better compatibility with upload and copy workflows.

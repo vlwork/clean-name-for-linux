@@ -7,6 +7,7 @@
 - Review recursive rename plans in a responsive Windows Forms GUI before changing anything.
 - Use Normal or Strict cleanup and optionally include nested directories.
 - Keep Linux/ext4 filename components within 255 UTF-8 bytes without splitting Unicode text elements.
+- Slash-like `U+29F8` (`⧸`) is normalized to ` - ` because real upload testing showed compatibility problems with this character.
 - Resolve conflicts deterministically while preserving file extensions and complete ` (N)` suffixes where possible.
 - Cancel a background scan, change settings, and rescan without accepting a partial plan.
 - Require confirmation and revalidate the saved plan immediately before Apply.
