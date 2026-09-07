@@ -1,11 +1,11 @@
 # Release checklist for 6.0.0-preview.1
 
-Use this checklist immediately before creating the GitHub prerelease. Leave platform-specific items open until they have been tested on the named environment.
+Use this checklist throughout release preparation, publication, and post-publication verification. Leave platform-specific items open until they have been tested on the named environment.
 
 ## Source and quality
 
 - [x] Confirm branch `v6-development` and baseline code commit `21c4317` before release-preparation documentation changes.
-- [ ] Record and verify the final release commit after the reviewed documentation is committed.
+- [x] Record and verify the final release commit after the reviewed documentation is committed: `0f1a3e4a3961e6a93419cf8395a49d0615c284a1`.
 - [x] Confirm the main checkout was clean before release-preparation documentation changes.
 - [x] Parse core, GUI, regression suite, benchmark, and build script with Windows PowerShell 5.1: zero errors.
 - [x] Run the regression suite: 63 passed, 0 failed, exit code 0.
@@ -40,14 +40,14 @@ Use this checklist immediately before creating the GitHub prerelease. Leave plat
 
 ## Repository and publication
 
-- [ ] Confirm `git status --short` is empty before tagging.
+- [x] Confirm `git status --short` is empty before tagging.
 - [x] Confirm release notes describe an unsigned Windows x64 preview and match README limitations.
 - [x] Confirm no fabricated screenshot or placeholder image is included.
 - [x] Select and add project `LICENSE`: `GPL-3.0-only`.
 - [ ] Review GitHub About description, topics, and website field.
 - [ ] Decide whether issue templates, contributing guidance, and a security policy are needed.
-- [ ] Commit the reviewed documentation and any separately approved release changes.
-- [ ] Create tag `v6.0.0-preview.1` from the approved commit.
-- [ ] Create a GitHub prerelease, not a stable release.
-- [ ] Upload only `Clean-File-Names.exe` and `Clean-File-Names.exe.sha256`.
-- [ ] Download both published artifacts into a clean directory and verify the checksum again.
+- [x] Commit the reviewed documentation and any separately approved release changes.
+- [x] Create tag `v6.0.0-preview.1` from the approved commit.
+- [x] Create a GitHub prerelease, not a stable release.
+- [x] Upload only `Clean-File-Names.exe` and `Clean-File-Names.exe.sha256`.
+- [x] Download both published artifacts into a clean directory and verify the checksum again; the EXE and sidecar SHA-256 both verified as `69F3C2E1B80E7A73FF18DCB37F23E4BB5A0BF60BEEB484F06135F902168323FE`.
