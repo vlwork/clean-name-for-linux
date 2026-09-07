@@ -12,7 +12,7 @@ Use this checklist immediately before creating the GitHub prerelease. Leave plat
 - [x] Repeat regression and build from a separate clean checkout of the release commit.
 - [x] Review README commands, paths, switches, examples, links, and version references.
 - [x] Update `CHANGELOG.md` with an Unreleased preview entry.
-- [ ] Replace `Unreleased` with the actual release date when publishing.
+- [x] Replace `Unreleased` with the actual release date when publishing.
 
 ## Build and artifact verification
 

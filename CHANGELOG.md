@@ -4,7 +4,7 @@ Notable changes to this project are documented in this file.
 
 The format is based on Keep a Changelog. This project is preparing a prerelease and does not yet declare a stable semantic-versioning compatibility policy.
 
-## [6.0.0-preview.1] - Unreleased
+## [6.0.0-preview.1] - 2026-09-07
 
 ### Added
 
