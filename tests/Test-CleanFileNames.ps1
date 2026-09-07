@@ -332,6 +332,11 @@ try {
     New-TestFile $NormalPath ("zwj-a{0}b.txt" -f [char]0x200D)
     New-TestFile $NormalPath ("zwnj-a{0}b.txt" -f [char]0x200C)
     New-TestFile $NormalPath ("fullwidth-a{0}b.txt" -f [char]0xFF1A)
+    $BigSolidus = ([char]0x29F8).ToString()
+    $BigSolidusNormalName = "К4${BigSolidus}16.mp4"
+    $BigSolidusRepeatedName = "1${BigSolidus}2${BigSolidus}3.txt"
+    New-TestFile $NormalPath $BigSolidusNormalName
+    New-TestFile $NormalPath $BigSolidusRepeatedName
     $Normal = Invoke-WithCoreText $CurrentCoreText $NormalPath
     $NormalMap = @{}
     foreach ($Record in $Normal.Records) {
@@ -346,6 +351,8 @@ try {
     Add-TestResult "ZWJ preserved" (-not ($Normal.Records.OriginalName -like "zwj-*").Count)
     Add-TestResult "ZWNJ preserved" (-not ($Normal.Records.OriginalName -like "zwnj-*").Count)
     Add-TestResult "Fullwidth forbidden character normalized" ($NormalMap.Count -gt 0 -and $NormalMap.Keys.Where({ $_ -like "fullwidth-*" }).Count -eq 1)
+    Add-TestResult "Normal BIG SOLIDUS separator" ($NormalMap[$BigSolidusNormalName] -eq "К4 - 16.mp4") $NormalMap[$BigSolidusNormalName]
+    Add-TestResult "Normal repeated BIG SOLIDUS separators" ($NormalMap[$BigSolidusRepeatedName] -eq "1 - 2 - 3.txt") $NormalMap[$BigSolidusRepeatedName]
 
     $StrictPath = New-TestDirectory "strict"
     foreach ($Name in @(
@@ -354,7 +361,8 @@ try {
         "file.a!!b",
         "file.a--!!--b",
         "file.t;xt",
-        "file.t&xt"
+        "file.t&xt",
+        $BigSolidusNormalName
     )) {
         New-TestFile $StrictPath $Name
     }
@@ -369,6 +377,7 @@ try {
     Add-TestResult "Strict does not globally collapse hyphens" ($StrictMap["file.a--!!--b"] -eq "file.a-----b") $StrictMap["file.a--!!--b"]
     Add-TestResult "Strict semicolon" ($StrictMap["file.t;xt"] -eq "file.t-xt")
     Add-TestResult "Strict ampersand" ($StrictMap["file.t&xt"] -eq "file.t+xt")
+    Add-TestResult "Strict BIG SOLIDUS uses Normal cleanup" ($StrictMap[$BigSolidusNormalName] -eq "К4 - 16.mp4") $StrictMap[$BigSolidusNormalName]
 
     # Collision sequence verifies suffix transitions 1, 10, and 100.
     # (Последовательность конфликтов проверяет переходы суффиксов 1, 10 и 100.)

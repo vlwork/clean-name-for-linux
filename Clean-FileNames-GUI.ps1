@@ -451,7 +451,8 @@ function Select-Folder {
     $Dialog.Description = "Select a folder to scan (Выберите папку для проверки)"
     $Dialog.ShowNewFolderButton = $false
 
-    if (Test-Path -LiteralPath $FolderTextBox.Text -PathType Container) {
+    if (-not [string]::IsNullOrWhiteSpace($FolderTextBox.Text) -and
+        (Test-Path -LiteralPath $FolderTextBox.Text -PathType Container)) {
         $Dialog.SelectedPath = $FolderTextBox.Text
     }
 

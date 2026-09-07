@@ -182,6 +182,7 @@ function Convert-ToSafeName {
     #   ：  U+FF1A FULLWIDTH COLON
     #   ／  U+FF0F FULLWIDTH SOLIDUS
     #   ＼  U+FF3C FULLWIDTH REVERSE SOLIDUS
+    #   ⧸  U+29F8 BIG SOLIDUS
     #   ｜  U+FF5C FULLWIDTH VERTICAL LINE
     #   ？  U+FF1F FULLWIDTH QUESTION MARK
     #   ＊  U+FF0A FULLWIDTH ASTERISK
@@ -203,6 +204,7 @@ function Convert-ToSafeName {
     $NewName = $NewName.Replace(([char]0xFF0F).ToString(), " - ") # ／
     $NewName = $NewName.Replace(([char]0xFF3C).ToString(), " - ") # ＼
     $NewName = $NewName.Replace(([char]0xFE68).ToString(), " - ") # ﹨
+    $NewName = $NewName.Replace(([char]0x29F8).ToString(), " - ") # ⧸
 
     # Pipe-like characters. (Символы, похожие на pipe.)
     $NewName = $NewName.Replace(([char]0xFF5C).ToString(), " - ") # ｜
@@ -969,7 +971,7 @@ function Process-File {
         )
         $ExtensionBody = [regex]::Replace(
             $ExtensionBody,
-            '[\uFF1A\uFE55\uFF0F\uFF3C\uFE68\uFF5C' +
+            '[\uFF1A\uFE55\uFF0F\uFF3C\uFE68\u29F8\uFF5C' +
             '\uFF1F\uFE56\uFF0A\uFE61\uFF1C\uFE64' +
             '\uFF1E\uFE65\uFF02]',
             ''
