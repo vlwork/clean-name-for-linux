@@ -71,10 +71,13 @@ function Get-CanonicalUtf8Payload {
         )
     }
 
-    # Re-encoding the strictly decoded text produces the exact canonical UTF-8
-    # payload used both for SHA-256 and Base64. Only an optional BOM is omitted.
-    # (Повторное кодирование строго декодированного текста создаёт canonical
-    # UTF-8 payload для SHA-256 и Base64. Удаляется только необязательный BOM.)
+    # Omit an optional UTF-8 BOM and canonicalize CRLF or lone CR line endings
+    # to LF in memory. The returned Text and Bytes represent the same canonical
+    # UTF-8 payload used for SHA-256 and Base64.
+    # (Удаляем необязательный UTF-8 BOM и в памяти приводим окончания строк CRLF
+    # и одиночные CR к LF. Возвращаемые Text и Bytes представляют один canonical
+    # UTF-8 payload, используемый для SHA-256 и Base64.)
+    $Text = $Text.Replace("`r`n", "`n").Replace("`r", "`n")
     $CanonicalBytes = $Utf8NoBom.GetBytes($Text)
 
     return [pscustomobject]@{
