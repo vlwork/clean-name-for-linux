@@ -201,3 +201,11 @@ The currently published release is based on `Clean-FileNames` v5. It is a workin
 - Rename logging.
 - Rename rollback support.
 - Automated tests.
+
+## Support / Поддержать проект
+
+If this project is useful to you, you can support its development.
+
+Если проект оказался полезен, вы можете поддержать его развитие.
+
+[Support via CloudTips / Поддержать через CloudTips](https://pay.cloudtips.ru/p/23e2873b)
