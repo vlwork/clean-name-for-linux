@@ -1,0 +1,67 @@
+name: Feature request
+description: Suggest an improvement for Clean Name for Linux
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the workflow problem before proposing a solution. Requests to replace additional Unicode characters should preferably include a reproducible compatibility problem or real-world evidence; the project intentionally avoids broad destructive Unicode normalization.
+
+        Сначала опишите проблему рабочего процесса. Для замены дополнительных Unicode-символов желательно привести воспроизводимую проблему совместимости или практическое подтверждение: проект намеренно избегает широкой разрушительной Unicode-нормализации.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or workflow
+      description: What problem or workflow should be improved? / Какую проблему или рабочий процесс нужно улучшить?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed_behavior
+    attributes:
+      label: Proposed behavior
+      description: Describe the desired behavior and its practical benefit. / Опишите желаемое поведение и практическую пользу.
+    validations:
+      required: true
+
+  - type: textarea
+    id: filename_examples
+    attributes:
+      label: Example filenames
+      description: Provide before/after examples when relevant. / Если применимо, приведите примеры до и после.
+      placeholder: |
+        Before: example name.ext
+        After: example-name.ext
+      render: text
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of the project does this concern? / Какой части проекта касается предложение?
+      options:
+        - Normal cleanup
+        - Strict cleanup
+        - GUI
+        - CLI
+        - Unicode compatibility
+        - Conflict handling
+        - Build/release
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives or workarounds
+      description: What do you currently do instead? / Какой обходной путь используется сейчас?
+
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: Additional context
+      description: Add relevant constraints, examples, or evidence. Do not include confidential data. / Добавьте важные ограничения, примеры или подтверждения без конфиденциальных данных.

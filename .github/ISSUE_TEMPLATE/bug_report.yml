@@ -1,0 +1,152 @@
+name: Bug report
+description: Report a reproducible problem with Clean Name for Linux
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a problem. Please provide a minimal reproducible example and redact private or sensitive data.
+
+        Спасибо за сообщение о проблеме. Приведите минимальный воспроизводимый пример и скройте конфиденциальные данные.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem description
+      description: Briefly describe what went wrong. / Кратко опишите проблему.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version or release
+      description: Which version did you use? / Какую версию вы использовали?
+      placeholder: v6.0.0-preview.1
+    validations:
+      required: true
+
+  - type: dropdown
+    id: run_method
+    attributes:
+      label: How was the application run?
+      options:
+        - Release EXE
+        - GUI PowerShell script
+        - CLI PowerShell script
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: windows_version
+    attributes:
+      label: Windows version
+      description: Include edition and build number when available. / Укажите редакцию и номер сборки, если они известны.
+      placeholder: Windows 11 Pro, build 26200
+    validations:
+      required: true
+
+  - type: input
+    id: display_scaling
+    attributes:
+      label: Display scaling
+      description: Include this when relevant to a GUI or layout issue. / Укажите масштаб для проблем GUI или отображения.
+      placeholder: 100%, 125%, 150%, or 200%
+
+  - type: dropdown
+    id: cleanup_mode
+    attributes:
+      label: Cleanup mode
+      options:
+        - Normal
+        - Strict
+    validations:
+      required: true
+
+  - type: dropdown
+    id: include_directories
+    attributes:
+      label: Rename directories / IncludeDirectories
+      description: Was directory renaming enabled? / Было ли включено переименование каталогов?
+      options:
+        - Disabled
+        - Enabled
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: input_names
+    attributes:
+      label: Exact example input filename(s)
+      description: Use minimal examples and redact sensitive names. / Используйте минимальные примеры и скройте личные данные.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_result
+    attributes:
+      label: Expected filename or result
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual_result
+    attributes:
+      label: Actual filename or result
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction_steps
+    attributes:
+      label: Reproduction steps
+      description: List the shortest sequence that reproduces the issue. / Укажите краткую последовательность воспроизведения.
+      placeholder: |
+        1. Select a folder...
+        2. Enable...
+        3. Run Scan...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: operation_phase
+    attributes:
+      label: When does the issue occur?
+      options:
+        - Dry Run only
+        - Apply only
+        - Both Dry Run and Apply
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: error_output
+    attributes:
+      label: Relevant error message or output
+      description: Paste only non-sensitive output. / Вставляйте только неконфиденциальный вывод.
+      render: text
+
+  - type: textarea
+    id: screenshots_logs
+    attributes:
+      label: Screenshots or logs
+      description: Optional. Drag files here after removing sensitive information. / Необязательно. Перед публикацией удалите конфиденциальные данные.
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmations
+      options:
+        - label: I reviewed the latest available preview or release notes. / Я ознакомился(-ась) с последними доступными примечаниями к версии.
+          required: true
+        - label: I backed up important files before using Apply, where applicable. / Перед Apply я создал(а) резервную копию важных файлов, если это применимо.
+          required: true
+        - label: I redacted sensitive or private filenames and data. / Я скрыл(а) конфиденциальные имена файлов и данные.
+          required: true
