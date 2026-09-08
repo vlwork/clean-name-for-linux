@@ -45,7 +45,7 @@ Use this checklist throughout release preparation, publication, and post-publica
 - [x] Confirm no fabricated screenshot or placeholder image is included.
 - [x] Select and add project `LICENSE`: `GPL-3.0-only`.
 - [x] Review GitHub About description, topics, and website field.
-- [ ] Decide whether issue templates, contributing guidance, and a security policy are needed.
+- [x] Decide whether issue templates, contributing guidance, and a security policy are needed.
 - [x] Commit the reviewed documentation and any separately approved release changes.
 - [x] Create tag `v6.0.0-preview.1` from the approved commit.
 - [x] Create a GitHub prerelease, not a stable release.
