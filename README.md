@@ -387,3 +387,11 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
 - Strict уменьшает число выбранных метасимволов, но не гарантирует безопасное имя без кавычек в shell.
 - Проект ориентирован на Windows. EXE не запускается в Linux или macOS, а исходный CLI документирован для PowerShell в Windows.
 - Из-за метаданных компилятора PS2EXE, включая timestamp и MVID, независимо собранные EXE не совпадают побайтно; проверяйте sidecar конкретного артефакта.
+
+## Support / Поддержать проект
+
+If this project is useful to you, you can support its development.
+
+Если проект оказался полезен, вы можете поддержать его развитие.
+
+[Support via CloudTips / Поддержать через CloudTips](https://pay.cloudtips.ru/p/23e2873b)
